@@ -5,3 +5,7 @@
 ^desktop\.ini$
 ^R/desktop\.ini$
 ^man/desktop\.ini$
+
+^desktop[.]ini$
+^R/desktop[.]ini$
+^man/desktop[.]ini$
