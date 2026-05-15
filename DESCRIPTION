@@ -17,6 +17,7 @@ LazyData: true
 Roxygen: list(markdown = TRUE)
 Imports:
     lme4,
+    reformulas,
     survey,
     stats,
     utils

@@ -13,17 +13,17 @@ utils::globalVariables(c(".y_hat", ".resid", ".y_hat_model"))
 
 #' @noRd
 .get_response_var <- function(formula) {
-  all.vars(lme4::nobars(formula))[1L]
+  all.vars(reformulas::nobars(formula))[1L]
 }
 
 #' @noRd
 .get_fixed_vars <- function(formula) {
-  setdiff(all.vars(lme4::nobars(formula)), .get_response_var(formula))
+  setdiff(all.vars(reformulas::nobars(formula)), .get_response_var(formula))
 }
 
 #' @noRd
 .get_group_vars <- function(formula) {
-  bars <- lme4::findbars(formula)
+  bars <- reformulas::findbars(formula)
   if (length(bars) == 0L) return(character(0L))
   unique(unlist(lapply(bars, function(x) all.vars(x[[3L]]))))
 }
