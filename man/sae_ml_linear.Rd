@@ -49,9 +49,10 @@ residuals are returned in the output object.}
 
 \item{control}{Control object passed to \code{\link[lme4]{lmer}}.}
 
-\item{...}{Additional named arguments passed to both
-\code{\link[lme4]{lmer}} and \code{\link[survey]{svydesign}}.
-Supply only arguments accepted by both, or rely on defaults for one of them.}
+\item{...}{Additional named arguments passed to \code{\link[survey]{svydesign}}
+only (e.g. \code{nest = TRUE} when PSU IDs are not unique across strata).
+These are \strong{not} forwarded to \code{\link[lme4]{lmer}};
+use \code{control} for lmer-specific tuning.}
 }
 \value{
 An object of class \code{"sae_ml_linear"}, a list with:
@@ -60,33 +61,20 @@ An object of class \code{"sae_ml_linear"}, a list with:
 \item{\code{formula}}{The model formula.}
 \item{\code{estimator}}{The estimator type used.}
 \item{\code{fitted_model}}{The fitted \code{lmerMod} object.}
-\item{\code{estimates}}{Data frame of final domain-level estimates with
-columns: domain variable(s), \code{estimate}, \code{variance},
-\code{se}, \code{rse}.}
-\item{\code{estimation_details}}{Data frame of estimation components for
-advanced users and debugging: domain variable(s),
-\code{estimate_synthetic}, \code{variance_synthetic},
-\code{correction}, \code{variance_correction},
-\code{estimate_final}, \code{variance_final},
+\item{\code{estimates}}{Data frame of final domain-level estimates:
+domain variable(s), \code{estimate}, \code{variance}, \code{se}, \code{rse}.}
+\item{\code{estimation_details}}{Estimation components for debugging:
+\code{estimate_synthetic}, \code{variance_synthetic}, \code{correction},
+\code{variance_correction}, \code{estimate_final}, \code{variance_final},
 \code{se_final}, \code{rse_final}, \code{n_model}, \code{n_proj}.}
-\item{\code{diagnostics}}{Named list of model diagnostics:
-\code{fixed_effects} (named numeric vector of fixed-effect coefficients),
-\code{variance_components} (data frame from \code{lme4::VarCorr}),
-\code{random_effect_groups} (character vector of grouping factor names),
-\code{singular_fit} (logical),
-\code{convergence_messages} (character vector, empty if none),
-\code{sigma} (residual standard deviation),
-\code{nobs} (number of observations used in model fitting),
-\code{aic}, \code{bic}, \code{loglik} (REML-based fit statistics),
-\code{icc} (intraclass correlation coefficient for single random-intercept
-models; \code{NA} for random-slope or multi-group structures).
-For residual diagnostics and additional model evaluation, use
-\code{result$fitted_model} directly.}
-\item{\code{notes}}{Character vector of methodological notes.}
-\item{\code{unit_projection}}{Unit-level data with \code{.y_hat}
-(only if \code{keep_unit = TRUE}).}
-\item{\code{unit_model_residual}}{Unit-level data with \code{.y_hat_model}
-and \code{.resid} (only if \code{keep_unit = TRUE}).}
+\item{\code{diagnostics}}{Model diagnostics: fixed effects, variance components,
+singular fit, convergence messages, sigma, nobs, AIC, BIC, logLik, ICC.}
+\item{\code{notes}}{Conditional notes generated from model or estimator
+conditions, such as singular fit, undefined ICC, or the bias-corrected
+variance assumption. Static methodological notes are documented in the
+sections below and are not repeated in the output object.}
+\item{\code{unit_projection}}{Unit-level predictions (only if \code{keep_unit = TRUE}).}
+\item{\code{unit_model_residual}}{Unit-level residuals (only if \code{keep_unit = TRUE}).}
 }
 }
 \description{
@@ -98,11 +86,36 @@ response \code{y} and predictors \code{X}), generates synthetic predictions on
 \code{data_proj} (a large survey with \code{X} but no \code{y}), and aggregates
 predictions to domain-level means using survey design information.
 
-Predictions always use fixed effects only (\code{re.form = NA}), so new
-random-effect levels in \code{data_proj} are permitted. The \code{cluster_ids},
-\code{weight}, and \code{strata} arguments are used exclusively in
-\code{\link[survey]{svydesign}} for the aggregation step, not in model fitting.
+The working model is fitted with the multilevel random-effects structure
+specified in \code{formula}. For projection, synthetic predictions are computed
+with \code{re.form = NA}, so random effects/BLUPs are not added to the
+projected values. The \code{cluster_ids}, \code{weight}, and \code{strata}
+arguments are used exclusively in \code{\link[survey]{svydesign}} for the
+aggregation step, not in model fitting.
 }
+\section{Variance assumptions}{
+
+The plug-in variance for the bias-corrected estimator is computed as
+\eqn{V(\hat{Y}_d^{BC}) \approx V(\hat{Y}_d^{syn}) + V(\bar{e}_d)},
+which assumes \code{data_model} and \code{data_proj} are from
+\strong{independent surveys} (Kim & Rao, 2012, Section 3). If \code{data_model}
+is a subsample of \code{data_proj}, the covariance term is non-zero and variance
+will be underestimated. This plug-in variance is approximate and does not
+fully account for model-parameter uncertainty.
+}
+
+\section{Prediction strategy}{
+
+The working model is fitted using the full multilevel structure specified in
+\code{formula}, including random effects. However, projection predictions are computed with
+\code{re.form = NA}, so the synthetic values use only the fixed-effect
+component: \eqn{\hat{y}_{ij} = x_{ij}^T \hat{\beta}}.
+Random effects/BLUPs are not added to the projected values. This allows prediction for domains or
+grouping levels that are absent from \code{data_model}.
+For the bias-corrected estimator, remaining domain-level discrepancies are accounted for through
+the design-weighted mean residual correction computed from \code{data_model}.
+}
+
 \examples{
 \dontrun{
 result <- sae_ml_linear(
@@ -114,20 +127,22 @@ result <- sae_ml_linear(
   estimator  = "bias_corrected"
 )
 
-# Final estimates only
 result$estimates
 as.data.frame(result)
-
-# Estimation components for debugging
 result$estimation_details
-
-# Model diagnostics
-result$diagnostics$aic
-result$diagnostics$icc
-
-# Print and summary
-print(result)
 summary(result)
+
+# With nested PSUs (PSU IDs not unique across strata)
+result2 <- sae_ml_linear(
+  formula     = income ~ educ + (1 | prov),
+  data_model  = survey_model,
+  data_proj   = survey_proj,
+  domain      = "kabkot",
+  cluster_ids = "psu_id",
+  weight      = "w",
+  strata      = "strata_id",
+  nest        = TRUE
+)
 }
 
 }

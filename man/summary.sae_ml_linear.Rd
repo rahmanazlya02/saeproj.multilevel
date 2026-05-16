@@ -12,7 +12,5 @@
 \item{...}{Further arguments (currently unused).}
 }
 \description{
-Displays a detailed summary including the model call, formula, estimator,
-fitted model summary, key diagnostics, final estimates, notes, and a
-pointer to \code{object$estimation_details}.
+Summary method for sae_ml_linear
 }

@@ -179,7 +179,7 @@ A detailed output can be displayed with:
 summary(result)
 ```
 
-`summary()` displays the full `lmer` model output, key diagnostics, final estimates, methodological notes, and a pointer to `result$estimation_details`.
+`summary()` displays the full `lmer` model output, key diagnostics, final estimates, conditional notes, and a pointer to `result$estimation_details`.
 
 ## Synthetic estimator
 
@@ -218,8 +218,8 @@ head(result_ku$unit_model_residual)
 
 When `keep_unit = TRUE`:
 
-- `result_ku$unit_projection` contains `data_proj` with an added `.y_hat` column;
-- `result_ku$unit_model_residual` contains the model-survey response, fixed-effect-component prediction `.y_hat_model`, and residual `.resid`.
+- `result_ku$unit_projection` contains the domain variable(s) and `.y_hat`;
+- `result_ku$unit_model_residual` contains the domain variable(s), response variable, `.y_hat_model`, and `.resid`.
 
 ## Model diagnostics
 
@@ -331,7 +331,7 @@ result_svy <- sae_ml_linear(
 | `$estimates` | Final domain-level estimates: domain column(s), `estimate`, `variance`, `se`, `rse` |
 | `$estimation_details` | Estimation components: synthetic estimate, correction, final estimate, and sample sizes per domain |
 | `$diagnostics` | Model diagnostics: fixed effects, variance components, AIC, BIC, logLik, ICC, singular fit, and convergence messages |
-| `$notes` | Methodological notes |
+| `$notes` | Conditional notes generated from model or estimator conditions, such as singular fit, convergence issues, undefined ICC, or the bias-corrected variance assumption |
 | `$unit_projection` | Unit-level `data_proj` with `.y_hat`, only if `keep_unit = TRUE` |
 | `$unit_model_residual` | Unit-level `data_model` with `.y_hat_model` and `.resid`, only if `keep_unit = TRUE` |
 
@@ -373,7 +373,7 @@ sae_ml_linear(
 | `estimator` | `"bias_corrected"` or `"synthetic"` |
 | `keep_unit` | If `TRUE`, unit-level predictions and residuals are stored in the output |
 | `control` | `lme4::lmerControl()` object passed to `lme4::lmer()` |
-| `...` | Additional named arguments passed to both `lme4::lmer()` and `survey::svydesign()` |
+| `...` | Additional named arguments passed to `survey::svydesign()` only, for example `nest = TRUE`. These are not forwarded to `lme4::lmer()`; use `control` for lmer-specific tuning. |
 
 ## Methodological notes
 

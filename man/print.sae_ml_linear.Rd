@@ -14,6 +14,5 @@
 \item{...}{Further arguments (currently unused).}
 }
 \description{
-Displays a concise summary: title, formula, estimator, number of domains,
-and a preview of the final estimates table.
+Print method for sae_ml_linear
 }

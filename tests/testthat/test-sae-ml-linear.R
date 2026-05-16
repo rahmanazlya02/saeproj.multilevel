@@ -21,8 +21,9 @@ make_test_data <- function(seed = 123) {
                          5 + 0.5*x1 + 2*x2 + area_eff[area] + rnorm(n_model, 0, 0.5)
   )
   area_proj <- sample(c(paste0("A", 1:n_area), "A7"), n_proj, replace = TRUE)
+
   data_proj <- data.frame(
-    domain    = ifelse(area_proj == "A7", "D4",
+    domain    = ifelse(area_proj == "A7", "D3",
                        paste0("D", ceiling(as.integer(substr(area_proj, 2, 2)) / 2))),
     area      = area_proj,
     x1        = rnorm(n_proj),
@@ -168,7 +169,8 @@ test_that("synthetic estimator sets correction to 0", {
     estimator  = "synthetic"
   )
   expect_equal(res$estimator, "synthetic")
-  expect_true(all(res$estimates$correction == 0))
+  expect_true(all(res$estimation_details$correction == 0))
+  expect_true(all(res$estimation_details$variance_correction == 0))
 })
 
 # Test 10: keep_unit = TRUE menyimpan unit data
@@ -184,4 +186,89 @@ test_that("keep_unit = TRUE returns unit data", {
   )
   expect_false(is.null(res$unit_projection))
   expect_false(is.null(res$unit_model_residual))
+})
+
+# Test 11 untuk cluster_ids = NULL
+test_that("cluster_ids = NULL is treated as no clustering", {
+  d <- make_test_data()
+
+  expect_no_warning(
+    sae_ml_linear(
+      formula     = y ~ x1 + x2 + (1 | area),
+      data_model  = d$data_model,
+      data_proj   = d$data_proj,
+      domain      = "domain",
+      cluster_ids = NULL,
+      weight      = "weight"
+    )
+  )
+})
+
+# Test 12: Test untuk Dynamic Notes
+test_that("notes are condition-dependent", {
+  d <- make_test_data()
+
+  res <- sae_ml_linear(
+    formula    = y ~ x1 + x2 + (1 | area),
+    data_model = d$data_model,
+    data_proj  = d$data_proj,
+    domain     = "domain",
+    weight     = "weight",
+    estimator  = "bias_corrected"
+  )
+
+  expect_true(is.character(res$notes))
+  expect_true(any(grepl("Bias-corrected", res$notes)))
+  expect_false(any(grepl("Predictions use fixed effects only", res$notes)))
+  expect_false(any(grepl("Survey design is used in aggregation", res$notes)))
+  expect_false(any(grepl("Plug-in variance from svyby", res$notes)))
+})
+
+# Test 13: Test struktur diagnostics
+test_that("diagnostics has expected components", {
+  d <- make_test_data()
+
+  res <- sae_ml_linear(
+    formula    = y ~ x1 + x2 + (1 | area),
+    data_model = d$data_model,
+    data_proj  = d$data_proj,
+    domain     = "domain",
+    weight     = "weight"
+  )
+
+  expect_true(all(c(
+    "fixed_effects",
+    "variance_components",
+    "singular_fit",
+    "convergence_messages",
+    "sigma",
+    "nobs",
+    "aic",
+    "bic",
+    "loglik",
+    "icc"
+  ) %in% names(res$diagnostics)))
+
+  expect_false("random_effect_groups" %in% names(res$diagnostics))
+})
+
+#Test 14: test domain tanpa data model
+test_that("warns when projection domain has no model observations", {
+  d <- make_test_data()
+
+  dp_bad <- d$data_proj
+  dp_bad$domain[dp_bad$area == "A7"] <- "D_new"
+
+  expect_warning(
+    res <- sae_ml_linear(
+      formula    = y ~ x1 + x2 + (1 | area),
+      data_model = d$data_model,
+      data_proj  = dp_bad,
+      domain     = "domain",
+      weight     = "weight"
+    ),
+    regexp = "no observations in data_model"
+  )
+
+  expect_s3_class(res, "sae_ml_linear")
 })

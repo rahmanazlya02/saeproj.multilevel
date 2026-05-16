@@ -51,9 +51,10 @@ res <- sae_ml_linear(
   estimator   = "bias_corrected"
 )
 
-#print(res)  # mencetak final estimates ringkas
-summary(res) # mencetak fitted model + diagnostics + final estimates + notes
-
+print(res)  # mencetak final estimates ringkas
+summary(res) # mencetak fitted model
+cat("\n--- Conditional notes ---\n")
+print(res$notes)
 cat("\n--- Estimation details ---\n")
 print(res$estimation_details) #mencetak estimasi detail dengan tambahan variance correction
 

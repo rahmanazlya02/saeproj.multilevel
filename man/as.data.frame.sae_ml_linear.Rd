@@ -9,16 +9,13 @@
 \arguments{
 \item{x}{An object of class \code{"sae_ml_linear"}.}
 
-\item{row.names}{Passed to \code{\link{as.data.frame}} (unused; included for
-S3 compatibility).}
+\item{row.names}{Passed to \code{\link{as.data.frame}} (unused; for S3 compatibility).}
 
-\item{optional}{Passed to \code{\link{as.data.frame}} (unused; included for
-S3 compatibility).}
+\item{optional}{Passed to \code{\link{as.data.frame}} (unused; for S3 compatibility).}
 
 \item{...}{Further arguments (currently unused).}
 }
 \description{
-Returns \code{x$estimates}: the final domain-level estimates table with
-columns domain variable(s), \code{estimate}, \code{variance}, \code{se},
-and \code{rse}.
+Returns \code{x$estimates}: domain-level estimates with columns
+domain variable(s), \code{estimate}, \code{variance}, \code{se}, \code{rse}.
 }
