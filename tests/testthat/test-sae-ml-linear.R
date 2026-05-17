@@ -157,20 +157,26 @@ test_that("as.data.frame returns data.frame", {
   expect_true(is.data.frame(as.data.frame(res)))
 })
 
-# Test 9: estimator synthetic berjalan dan correction = 0
-test_that("synthetic estimator sets correction to 0", {
+# Test 9: estimator utama selalu bias-corrected dan komponen synthetic tetap tersedia
+test_that("returns bias-corrected estimator and keeps synthetic components", {
   d   <- make_test_data()
   res <- sae_ml_linear(
     formula    = y ~ x1 + x2 + (1 | area),
     data_model = d$data_model,
     data_proj  = d$data_proj,
     domain     = "domain",
-    weight     = "weight",
-    estimator  = "synthetic"
+    weight     = "weight"
   )
-  expect_equal(res$estimator, "synthetic")
-  expect_true(all(res$estimation_details$correction == 0))
-  expect_true(all(res$estimation_details$variance_correction == 0))
+
+  expect_equal(res$estimator, "bias_corrected")
+  expect_true(all(c(
+    "estimate_synthetic",
+    "variance_synthetic",
+    "correction",
+    "variance_correction",
+    "estimate_final",
+    "variance_final"
+  ) %in% names(res$estimation_details)))
 })
 
 # Test 10: keep_unit = TRUE menyimpan unit data
@@ -192,16 +198,16 @@ test_that("keep_unit = TRUE returns unit data", {
 test_that("cluster_ids = NULL is treated as no clustering", {
   d <- make_test_data()
 
-  expect_no_warning(
-    sae_ml_linear(
-      formula     = y ~ x1 + x2 + (1 | area),
-      data_model  = d$data_model,
-      data_proj   = d$data_proj,
-      domain      = "domain",
-      cluster_ids = NULL,
-      weight      = "weight"
-    )
+  res <- sae_ml_linear(
+    formula     = y ~ x1 + x2 + (1 | area),
+    data_model  = d$data_model,
+    data_proj   = d$data_proj,
+    domain      = "domain",
+    cluster_ids = NULL,
+    weight      = "weight"
   )
+
+  expect_s3_class(res, "sae_ml_linear")
 })
 
 # Test 12: Test untuk Dynamic Notes
@@ -214,10 +220,10 @@ test_that("notes are condition-dependent", {
     data_proj  = d$data_proj,
     domain     = "domain",
     weight     = "weight",
-    estimator  = "bias_corrected"
   )
 
   expect_true(is.character(res$notes))
+  expect_equal(res$estimator, "bias_corrected")
   expect_true(any(grepl("Bias-corrected", res$notes)))
   expect_false(any(grepl("Predictions use fixed effects only", res$notes)))
   expect_false(any(grepl("Survey design is used in aggregation", res$notes)))

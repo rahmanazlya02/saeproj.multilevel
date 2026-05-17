@@ -12,7 +12,6 @@ sae_ml_linear(
   cluster_ids = ~1,
   weight = NULL,
   strata = NULL,
-  estimator = c("bias_corrected", "synthetic"),
   keep_unit = FALSE,
   control = lme4::lmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e+05)),
   ...
@@ -41,9 +40,6 @@ for equal weights.}
 
 \item{strata}{Stratification variable. Character, formula, or \code{NULL}.}
 
-\item{estimator}{\code{"bias_corrected"} (default) adds an empirical residual
-correction from \code{data_model}; \code{"synthetic"} uses projection only.}
-
 \item{keep_unit}{Logical. If \code{TRUE}, unit-level predictions and model
 residuals are returned in the output object.}
 
@@ -59,7 +55,7 @@ An object of class \code{"sae_ml_linear"}, a list with:
 \describe{
 \item{\code{call}}{The matched call.}
 \item{\code{formula}}{The model formula.}
-\item{\code{estimator}}{The estimator type used.}
+\item{\code{estimator}}{The estimator type used; currently always \code{"bias_corrected"}.}
 \item{\code{fitted_model}}{The fitted \code{lmerMod} object.}
 \item{\code{estimates}}{Data frame of final domain-level estimates:
 domain variable(s), \code{estimate}, \code{variance}, \code{se}, \code{rse}.}
@@ -87,11 +83,13 @@ response \code{y} and predictors \code{X}), generates synthetic predictions on
 predictions to domain-level means using survey design information.
 
 The working model is fitted with the multilevel random-effects structure
-specified in \code{formula}. For projection, synthetic predictions are computed
-with \code{re.form = NA}, so random effects/BLUPs are not added to the
-projected values. The \code{cluster_ids}, \code{weight}, and \code{strata}
-arguments are used exclusively in \code{\link[survey]{svydesign}} for the
-aggregation step, not in model fitting.
+specified in \code{formula}. For projection, predictions use empirical
+multilevel predictions from \code{lme4::predict()}: observed grouping levels
+use fixed effects plus their predicted random effects/BLUPs, while grouping
+levels that appear only in \code{data_proj} remain estimable through the
+fitted fixed-effect component. The \code{cluster_ids}, \code{weight}, and
+\code{strata} arguments are used exclusively in
+\code{\link[survey]{svydesign}} for the aggregation step, not in model fitting.
 }
 \section{Variance assumptions}{
 
@@ -107,13 +105,16 @@ fully account for model-parameter uncertainty.
 \section{Prediction strategy}{
 
 The working model is fitted using the full multilevel structure specified in
-\code{formula}, including random effects. However, projection predictions are computed with
-\code{re.form = NA}, so the synthetic values use only the fixed-effect
-component: \eqn{\hat{y}_{ij} = x_{ij}^T \hat{\beta}}.
-Random effects/BLUPs are not added to the projected values. This allows prediction for domains or
-grouping levels that are absent from \code{data_model}.
-For the bias-corrected estimator, remaining domain-level discrepancies are accounted for through
-the design-weighted mean residual correction computed from \code{data_model}.
+\code{formula}, including random effects. Projection predictions use conditional
+multilevel prediction for grouping levels observed in \code{data_model}:
+\deqn{\hat{y}_{ij} = x_{ij}^T\hat{\beta} + z_{ij}^T\hat{u}_j.}
+Grouping levels that appear only in \code{data_proj} are still supported; for
+those levels, predictions rely on the fitted fixed-effect component. This
+behavior is internal to the function; users do not need to specify an
+\code{allow_new_levels} argument. The final returned estimator is always the
+bias-corrected estimator, where remaining domain-level discrepancies are
+accounted for through the design-weighted mean residual correction computed
+from \code{data_model}.
 }
 
 \examples{
@@ -123,8 +124,7 @@ result <- sae_ml_linear(
   data_model = survey_model,
   data_proj  = survey_proj,
   domain     = "kabkot",
-  weight     = "w",
-  estimator  = "bias_corrected"
+  weight     = "w"
 )
 
 result$estimates
@@ -149,6 +149,15 @@ result2 <- sae_ml_linear(
 \references{
 Kim, J.K. & Rao, J.N.K. (2012). Combining data from two independent surveys:
 a model-assisted approach. \emph{Biometrika}, 99(1), 85-100.
+
+Moura, F.A.S. & Holt, D. (1999). Small area estimation using multilevel models.
+\emph{Survey Methodology}, 25(1), 73-80.
+
+Nguyen, P., Haughton, D., Hudson, I. & Boland, J. (2017). Small area estimation
+by multilevel models applied to the Vietnam Living Standards Surveys.
+\emph{Statistical Journal of the IAOS}, 33, 671-681.
+
+FAO. (2021). \emph{Guidelines on data disaggregation for SDG Indicators using survey data}. Rome.
 
 Bates, D., Maechler, M., Bolker, B. & Walker, S. (2015). Fitting linear
 mixed-effects models using lme4. \emph{Journal of Statistical Software},

@@ -48,7 +48,6 @@ res <- sae_ml_linear(
   domain      = "domain",
   cluster_ids = ~1,
   weight      = "weight",
-  estimator   = "bias_corrected"
 )
 
 print(res)  # mencetak final estimates ringkas

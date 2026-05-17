@@ -3,6 +3,9 @@
 #
 # References:
 #   Kim & Rao (2012). Biometrika, 99(1), 85-100.
+#   Moura & Holt (1999). Survey Methodology, 25(1), 73-80.
+#   Nguyen et al. (2017). Statistical Journal of the IAOS, 33, 671-681.
+#   FAO (2021). Guidelines on data disaggregation for SDG Indicators using survey data.
 #   Bates et al. (2015). J. Statistical Software, 67(1), 1-48.
 #   Lumley (2010). Complex Surveys. Wiley.
 
@@ -215,16 +218,19 @@ utils::globalVariables(c(".y_hat", ".resid", ".y_hat_model"))
     }
   }
 
-  # Grouping variable is optional in data_proj (re.form = NA); harmonize only
-  # if present, so downstream diagnostics remain stable.
+  # Grouping variables are required in data_proj for conditional multilevel
+  # prediction. New grouping levels are allowed internally so predictions remain
+  # available for projection-only groups.
   for (v in group_vars) {
-    if (!v %in% names(dp)) next
-    xm <- dm[[v]]; xp <- dp[[v]]
-    if (is_cat(xm) || is_cat(xp)) {
-      all_lvls <- union(.model_levels(xm), unique(as.character(xp[!is.na(xp)])))
-      dm[[v]]  <- factor(as.character(xm), levels = all_lvls, ordered = is.ordered(xm))
-      dp[[v]]  <- factor(as.character(xp), levels = all_lvls, ordered = is.ordered(xm))
-    }
+    xm <- dm[[v]]
+    xp <- dp[[v]]
+
+    model_lvls <- .model_levels(xm)
+    proj_lvls  <- unique(as.character(xp[!is.na(xp)]))
+    all_lvls   <- union(model_lvls, proj_lvls)
+
+    dm[[v]] <- factor(as.character(xm), levels = model_lvls, ordered = is.ordered(xm))
+    dp[[v]] <- factor(as.character(xp), levels = all_lvls,   ordered = is.ordered(xm))
   }
 
   list(data_model = dm, data_proj = dp)
@@ -276,11 +282,13 @@ utils::globalVariables(c(".y_hat", ".resid", ".y_hat_model"))
 #' predictions to domain-level means using survey design information.
 #'
 #' The working model is fitted with the multilevel random-effects structure
-#' specified in \code{formula}. For projection, synthetic predictions are computed
-#' with \code{re.form = NA}, so random effects/BLUPs are not added to the
-#' projected values. The \code{cluster_ids}, \code{weight}, and \code{strata}
-#' arguments are used exclusively in \code{\link[survey]{svydesign}} for the
-#' aggregation step, not in model fitting.
+#' specified in \code{formula}. For projection, predictions use empirical
+#' multilevel predictions from \code{lme4::predict()}: observed grouping levels
+#' use fixed effects plus their predicted random effects/BLUPs, while grouping
+#' levels that appear only in \code{data_proj} remain estimable through the
+#' fitted fixed-effect component. The \code{cluster_ids}, \code{weight}, and
+#' \code{strata} arguments are used exclusively in
+#' \code{\link[survey]{svydesign}} for the aggregation step, not in model fitting.
 #'
 #' @param formula An \code{lme4::lmer()}-style formula, e.g.
 #'   \code{y ~ x1 + x2 + (1 | area)}.
@@ -297,8 +305,6 @@ utils::globalVariables(c(".y_hat", ".resid", ".y_hat_model"))
 #' @param weight Survey weight variable. Character scalar, formula, or \code{NULL}
 #'   for equal weights.
 #' @param strata Stratification variable. Character, formula, or \code{NULL}.
-#' @param estimator \code{"bias_corrected"} (default) adds an empirical residual
-#'   correction from \code{data_model}; \code{"synthetic"} uses projection only.
 #' @param keep_unit Logical. If \code{TRUE}, unit-level predictions and model
 #'   residuals are returned in the output object.
 #' @param control Control object passed to \code{\link[lme4]{lmer}}.
@@ -311,7 +317,7 @@ utils::globalVariables(c(".y_hat", ".resid", ".y_hat_model"))
 #' \describe{
 #'   \item{\code{call}}{The matched call.}
 #'   \item{\code{formula}}{The model formula.}
-#'   \item{\code{estimator}}{The estimator type used.}
+#'   \item{\code{estimator}}{The estimator type used; currently always \code{"bias_corrected"}.}
 #'   \item{\code{fitted_model}}{The fitted \code{lmerMod} object.}
 #'   \item{\code{estimates}}{Data frame of final domain-level estimates:
 #'     domain variable(s), \code{estimate}, \code{variance}, \code{se}, \code{rse}.}
@@ -340,17 +346,29 @@ utils::globalVariables(c(".y_hat", ".resid", ".y_hat_model"))
 #'
 #' @section Prediction strategy:
 #' The working model is fitted using the full multilevel structure specified in
-#' \code{formula}, including random effects. However, projection predictions are computed with
-#' \code{re.form = NA}, so the synthetic values use only the fixed-effect
-#' component: \eqn{\hat{y}_{ij} = x_{ij}^T \hat{\beta}}.
-#' Random effects/BLUPs are not added to the projected values. This allows prediction for domains or
-#' grouping levels that are absent from \code{data_model}.
-#' For the bias-corrected estimator, remaining domain-level discrepancies are accounted for through
-#' the design-weighted mean residual correction computed from \code{data_model}.
+#' \code{formula}, including random effects. Projection predictions use conditional
+#' multilevel prediction for grouping levels observed in \code{data_model}:
+#' \deqn{\hat{y}_{ij} = x_{ij}^T\hat{\beta} + z_{ij}^T\hat{u}_j.}
+#' Grouping levels that appear only in \code{data_proj} are still supported; for
+#' those levels, predictions rely on the fitted fixed-effect component. This
+#' behavior is internal to the function; users do not need to specify an
+#' \code{allow_new_levels} argument. The final returned estimator is always the
+#' bias-corrected estimator, where remaining domain-level discrepancies are
+#' accounted for through the design-weighted mean residual correction computed
+#' from \code{data_model}.
 #'
 #' @references
 #' Kim, J.K. & Rao, J.N.K. (2012). Combining data from two independent surveys:
 #' a model-assisted approach. \emph{Biometrika}, 99(1), 85-100.
+#'
+#' Moura, F.A.S. & Holt, D. (1999). Small area estimation using multilevel models.
+#' \emph{Survey Methodology}, 25(1), 73-80.
+#'
+#' Nguyen, P., Haughton, D., Hudson, I. & Boland, J. (2017). Small area estimation
+#' by multilevel models applied to the Vietnam Living Standards Surveys.
+#' \emph{Statistical Journal of the IAOS}, 33, 671-681.
+#'
+#' FAO. (2021). \emph{Guidelines on data disaggregation for SDG Indicators using survey data}. Rome.
 #'
 #' Bates, D., Maechler, M., Bolker, B. & Walker, S. (2015). Fitting linear
 #' mixed-effects models using lme4. \emph{Journal of Statistical Software},
@@ -365,8 +383,7 @@ utils::globalVariables(c(".y_hat", ".resid", ".y_hat_model"))
 #'   data_model = survey_model,
 #'   data_proj  = survey_proj,
 #'   domain     = "kabkot",
-#'   weight     = "w",
-#'   estimator  = "bias_corrected"
+#'   weight     = "w"
 #' )
 #'
 #' result$estimates
@@ -396,13 +413,12 @@ sae_ml_linear <- function(
     cluster_ids = ~1,
     weight      = NULL,
     strata      = NULL,
-    estimator   = c("bias_corrected", "synthetic"),
     keep_unit   = FALSE,
     control     = lme4::lmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e5)),
     ...
 ) {
-  mc        <- match.call()
-  estimator <- match.arg(estimator)
+  mc <- match.call()
+  estimator <- "bias_corrected"
 
   # -- Input validation -------------------------------------------------------
   if (!is.data.frame(data_model))
@@ -434,8 +450,7 @@ sae_ml_linear <- function(
   # -- Column checks ----------------------------------------------------------
   svy_vars    <- unique(c(.var_names(cluster_ids), .var_names(weight), .var_names(strata)))
   req_model   <- unique(c(response_var, fixed_vars, group_vars, domain_chr, svy_vars))
-  req_proj    <- unique(c(fixed_vars, domain_chr, svy_vars,
-                          intersect(group_vars, names(data_proj))))
+  req_proj    <- unique(c(fixed_vars, group_vars, domain_chr, svy_vars))
 
   .check_cols(data_model, req_model, "data_model")
   .check_cols(data_proj,  req_proj,  "data_proj")
@@ -479,13 +494,42 @@ sae_ml_linear <- function(
     notes <- c(notes, paste0("Convergence issue: ", conv_text))
   }
 
+  # Warn when ICC is very low for a single random-intercept model.
+  # For random-slope or multi-group models, ICC is returned as NA and this
+  # diagnostic is not applied.
+  if (!is.na(diag$icc) && diag$icc < 0.05) {
+    warning(
+      "Low ICC detected (ICC = ", round(diag$icc, 4L), "). ",
+      "Between-area variation is weak; the random-intercept component may add ",
+      "limited improvement over a fixed-effect model.",
+      call. = FALSE
+    )
+    notes <- c(notes, paste0(
+      "Low ICC detected (ICC = ", round(diag$icc, 4L), "); ",
+      "between-area variation is weak, so the random-intercept component may add limited benefit."
+    ))
+  }
+
   # -- Predictions ------------------------------------------------------------
-  # The model is fitted with random effects, but projection predictions use
-  # re.form = NA; random effects/BLUPs are not added to synthetic values.
-  # Residuals are e_i = y_i - x_i' * beta_hat, not BLUP residuals.
-  data_proj$.y_hat        <- stats::predict(fit, newdata = data_proj,  re.form = NA)
-  data_model$.y_hat_model <- stats::predict(fit, newdata = data_model, re.form = NA)
-  data_model$.resid       <- data_model[[response_var]] - data_model$.y_hat_model
+  # Conditional multilevel prediction with automatic support for new levels:
+  # - levels observed in data_model: fixed effects + predicted random effects/BLUPs
+  # - projection-only levels remain estimable through the fitted fixed effects
+  # Users do not need an allow_new_levels argument; this is handled internally.
+  data_proj$.y_hat <- stats::predict(
+    fit,
+    newdata = data_proj,
+    re.form = NULL,
+    allow.new.levels = TRUE
+  )
+
+  data_model$.y_hat_model <- stats::predict(
+    fit,
+    newdata = data_model,
+    re.form = NULL,
+    allow.new.levels = FALSE
+  )
+
+  data_model$.resid <- data_model[[response_var]] - data_model$.y_hat_model
 
   # -- Survey design ----------------------------------------------------------
   design_args <- list(ids = cluster_ids, weight = weight, strata = strata, ...)
@@ -507,39 +551,41 @@ sae_ml_linear <- function(
   var_correction <- rep(0, nrow(est_proj))
 
   # -- Bias correction --------------------------------------------------------
-  if (estimator == "bias_corrected") {
-    est_resid <- as.data.frame(survey::svyby(
-      formula = ~.resid, by = domain_formula, design = design_model,
-      FUN = survey::svymean, vartype = "var", na.rm = TRUE, keep.names = FALSE
-    ))
-    est_resid <- .rename_svyby_output(est_resid, domain_chr,
-                                      ".resid", "correction", "variance_correction")
+  # The function always returns the bias-corrected estimator.
+  # Synthetic projection is kept internally as a component, but it is not exposed
+  # as a separate estimator option.
+  est_resid <- as.data.frame(survey::svyby(
+    formula = ~.resid, by = domain_formula, design = design_model,
+    FUN = survey::svymean, vartype = "var", na.rm = TRUE, keep.names = FALSE
+  ))
+  est_resid <- .rename_svyby_output(est_resid, domain_chr,
+                                    ".resid", "correction", "variance_correction")
 
-    merged <- merge(
-      est_proj,
-      est_resid[, c(domain_chr, "correction", "variance_correction")],
-      by = domain_chr, all.x = TRUE
+  merged <- merge(
+    est_proj,
+    est_resid[, c(domain_chr, "correction", "variance_correction")],
+    by = domain_chr, all.x = TRUE
+  )
+
+  # Domains in data_proj with no data_model observations get no residual correction.
+  # They remain estimable through the synthetic projection component.
+  no_corr <- .domain_labels(merged[is.na(merged$correction), domain_chr, drop = FALSE],
+                            domain_chr)
+  if (length(no_corr) > 0L)
+    warning(
+      length(no_corr), " domain(s) have no observations in data_model; ",
+      "no residual correction is available for these domains. Domain(s): ",
+      paste(utils::head(no_corr, 5L), collapse = ", "),
+      if (length(no_corr) > 5L) " [... and more]" else "",
+      call. = FALSE
     )
 
-    # Domains in data_proj with no data_model observations get no correction
-    no_corr <- .domain_labels(merged[is.na(merged$correction), domain_chr, drop = FALSE],
-                              domain_chr)
-    if (length(no_corr) > 0L)
-      warning(
-        length(no_corr), " domain(s) have no observations in data_model; ",
-        "residual correction set to 0 (synthetic estimator used). Domain(s): ",
-        paste(utils::head(no_corr, 5L), collapse = ", "),
-        if (length(no_corr) > 5L) " [... and more]" else "",
-        call. = FALSE
-      )
+  merged$correction[is.na(merged$correction)]                   <- 0
+  merged$variance_correction[is.na(merged$variance_correction)] <- 0
 
-    merged$correction[is.na(merged$correction)]                   <- 0
-    merged$variance_correction[is.na(merged$variance_correction)] <- 0
-
-    est_proj       <- merged
-    correction_col <- est_proj$correction
-    var_correction <- est_proj$variance_correction
-  }
+  est_proj       <- merged
+  correction_col <- est_proj$correction
+  var_correction <- est_proj$variance_correction
 
   # -- Final estimates --------------------------------------------------------
   # Var(Y_d^BC) = Var(Y_d^syn) + Var(e_bar_d), assuming data_model and data_proj
@@ -555,7 +601,7 @@ sae_ml_linear <- function(
                                   domain_chr)
     warning(
       length(neg_var_idx), " domain(s) have negative plug-in variance; clamped to 0. ",
-      "Consider the synthetic estimator for these domains. Domain(s): ",
+      "Check the survey design, model fit, and small-domain sample sizes. Domain(s): ",
       paste(utils::head(neg_domains, 5L), collapse = ", "),
       if (length(neg_domains) > 5L) " [... and more]" else "",
       call. = FALSE
@@ -608,13 +654,14 @@ sae_ml_linear <- function(
   # -- Conditional notes ------------------------------------------------------
   # Static methodological notes are documented in roxygen sections above.
   # Only run-specific notes are stored in the output object.
-  if (estimator == "bias_corrected") {
-    notes <- c(notes, paste0(
-      "Bias-corrected: Var = Var(synthetic) + Var(correction). ",
-      "Assumes data_model and data_proj are independent surveys ",
-      "(Kim & Rao 2012, Section 3)."
-    ))
-  }
+  notes <- c(notes, paste0(
+    "Bias-corrected estimator returned by default: estimate = synthetic projection + residual correction. ",
+    "Var = Var(synthetic) + Var(correction), assuming data_model and data_proj are independent surveys."
+  ))
+  notes <- c(notes, paste0(
+    "Prediction uses conditional multilevel prediction for observed grouping levels; ",
+    "new grouping levels in data_proj remain estimable using the fitted fixed-effect component."
+  ))
   if (is.na(diag$icc))
     notes <- c(notes,
                "ICC is NA: random-slope or multi-group model; ICC requires single random-intercept.")

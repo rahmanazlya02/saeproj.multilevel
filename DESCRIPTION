@@ -10,7 +10,9 @@ Description: Provides tools for small area estimation using a projection
     function sae_ml_linear() fits a linear multilevel model on a smaller model
     survey, generates synthetic predictions on a larger projection survey, and
     aggregates predictions to domain-level estimates using survey design
-    information. Both synthetic and bias-corrected estimators are supported.
+    information. The main estimator returned by sae_ml_linear() is the
+    bias-corrected projection estimator; synthetic projection components are
+    retained in the estimation details for diagnostics.
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
