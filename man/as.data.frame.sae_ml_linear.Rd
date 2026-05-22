@@ -7,15 +7,17 @@
 \method{as.data.frame}{sae_ml_linear}(x, row.names = NULL, optional = FALSE, ...)
 }
 \arguments{
-\item{x}{An object of class \code{"sae_ml_linear"}.}
+\item{x}{Object of class \code{"sae_ml_linear"}.}
 
-\item{row.names}{Passed to \code{\link{as.data.frame}} (unused; for S3 compatibility).}
+\item{row.names}{Ignored.}
 
-\item{optional}{Passed to \code{\link{as.data.frame}} (unused; for S3 compatibility).}
+\item{optional}{Ignored.}
 
-\item{...}{Further arguments (currently unused).}
+\item{...}{Further arguments.}
+}
+\value{
+A data frame containing domain-level estimates.
 }
 \description{
-Returns \code{x$estimates}: domain-level estimates with columns
-domain variable(s), \code{estimate}, \code{variance}, \code{se}, \code{rse}.
+Coerce an sae_ml_linear object to a data frame
 }

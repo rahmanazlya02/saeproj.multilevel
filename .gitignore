@@ -8,5 +8,9 @@
 desktop.ini
 **/desktop.ini
 
+check/
 *.Rcheck/
 *.tar.gz
+*.pdf
+
+dev/

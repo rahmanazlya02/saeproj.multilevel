@@ -1,23 +1,27 @@
 Package: saeproj.multilevel
-Type: Package
-Title: Small Area Estimation via Projection Estimator with Linear Multilevel Models
+Title: Small Area Estimation via Multilevel Projection Estimator
 Version: 0.1.0
-Authors@R: person("Nazlya", "Rahma Susanto",
-    email = "susantonazlya@gmail.com",
-    role = c("aut", "cre"))
-Description: Provides tools for small area estimation using a projection
-    estimator approach with linear mixed-effects working models. The main
-    function sae_ml_linear() fits a linear multilevel model on a smaller model
-    survey, generates synthetic predictions on a larger projection survey, and
-    aggregates predictions to domain-level estimates using survey design
-    information. The main estimator returned by sae_ml_linear() is the
-    bias-corrected projection estimator; synthetic projection components are
-    retained in the estimation details for diagnostics.
+Authors@R: 
+    person(
+        given = "Nazlya",
+        family = "Rahma Susanto",
+        email = "susantonazlya@gmail.com",
+        role = c("aut", "cre")
+    )
+Description: Provides tools for Small Area Estimation using a projection
+    estimator with a linear mixed-effects working model. The main function
+    fits a multilevel model to a smaller survey containing the response
+    variable and auxiliary predictors, predicts outcomes in a larger
+    projection dataset, and computes domain-level estimates with design-based
+    residual bias correction.
 License: MIT + file LICENSE
 Encoding: UTF-8
-LazyData: true
 Roxygen: list(markdown = TRUE)
+RoxygenNote: 8.0.0
+Config/roxygen2/version: 8.0.0
 Imports:
+    cli,
+    dplyr,
     lme4,
     reformulas,
     survey,
@@ -28,4 +32,3 @@ Suggests:
 Config/testthat/edition: 3
 URL: https://github.com/rahmanazlya02/saeproj.multilevel
 BugReports: https://github.com/rahmanazlya02/saeproj.multilevel/issues
-Config/roxygen2/version: 8.0.0

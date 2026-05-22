@@ -7,9 +7,12 @@
 \method{summary}{sae_ml_linear}(object, ...)
 }
 \arguments{
-\item{object}{An object of class \code{"sae_ml_linear"}.}
+\item{object}{Object of class \code{"sae_ml_linear"}.}
 
-\item{...}{Further arguments (currently unused).}
+\item{...}{Further arguments.}
+}
+\value{
+Invisibly returns \code{object}.
 }
 \description{
 Summary method for sae_ml_linear

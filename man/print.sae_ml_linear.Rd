@@ -7,11 +7,14 @@
 \method{print}{sae_ml_linear}(x, n = 6L, ...)
 }
 \arguments{
-\item{x}{An object of class \code{"sae_ml_linear"}.}
+\item{x}{Object of class \code{"sae_ml_linear"}.}
 
-\item{n}{Integer. Number of rows to preview from \code{estimates}.}
+\item{n}{Number of rows to display.}
 
-\item{...}{Further arguments (currently unused).}
+\item{...}{Further arguments.}
+}
+\value{
+Invisibly returns \code{x}.
 }
 \description{
 Print method for sae_ml_linear
