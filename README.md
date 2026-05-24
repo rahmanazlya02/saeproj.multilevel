@@ -1,8 +1,5 @@
 # saeproj.multilevel
 
-<!-- badges: start -->
-<!-- badges: end -->
-
 ## Author
 
 Nazlya Rahma Susanto
@@ -403,7 +400,6 @@ Typical components are:
 | `$estimates` | Final domain-level estimates |
 | `$estimation_details` | Synthetic estimate, correction, final estimate, and sample sizes per domain |
 | `$diagnostics` | Model diagnostics: ICC, singular fit, prediction mode, convergence, sigma, AIC, and BIC |
-| `$scaling_info` | Mean and standard deviation used for internal numeric standardization |
 | `$notes` | Concise run-specific notes |
 | `$unit_projection` | Unit-level `data_proj` with `.y_hat`, only if `keep_unit = TRUE` |
 | `$unit_model_residual` | Unit-level `data_model` with `.y_hat_model` and `.resid`, only if `keep_unit = TRUE` |

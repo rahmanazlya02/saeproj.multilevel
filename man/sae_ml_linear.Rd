@@ -73,8 +73,6 @@ variable(s), \code{estimate}, \code{variance}, \code{se}, and \code{rse}.}
 synthetic estimates, bias corrections, and sample counts.}
 \item{\code{diagnostics}}{Model diagnostics including ICC, singular-fit
 status, prediction mode, convergence message, sigma, AIC, and BIC.}
-\item{\code{scaling_info}}{Parameters used for internal numeric
-standardization.}
 \item{\code{notes}}{Concise run-specific notes and warning conditions.}
 \item{\code{unit_projection}}{Returned when \code{keep_unit = TRUE}.}
 \item{\code{unit_model_residual}}{Returned when \code{keep_unit = TRUE}.}

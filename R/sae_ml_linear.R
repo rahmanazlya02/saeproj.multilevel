@@ -163,32 +163,6 @@ utils::globalVariables(c(
 }
 
 #' @noRd
-# Standardizes numeric fixed-effect predictors using data_model statistics.
-.standardize_numeric <- function(data_model, data_proj, fixed_vars) {
-  numeric_vars <- fixed_vars[vapply(data_model[fixed_vars], is.numeric, logical(1L))]
-  scaling_info <- list()
-
-  for (v in numeric_vars) {
-    if (length(unique(data_model[[v]])) <= 5L) next
-
-    mu <- mean(data_model[[v]], na.rm = TRUE)
-    sdv <- stats::sd(data_model[[v]], na.rm = TRUE)
-
-    if (!is.na(sdv) && sdv > 0) {
-      data_model[[v]] <- (data_model[[v]] - mu) / sdv
-      data_proj[[v]] <- (data_proj[[v]] - mu) / sdv
-      scaling_info[[v]] <- c(mean = mu, sd = sdv)
-    }
-  }
-
-  list(
-    data_model = data_model,
-    data_proj = data_proj,
-    scaling_info = scaling_info
-  )
-}
-
-#' @noRd
 # Fits the linear mixed-effects working model.
 # Survey weights are used in the design-based aggregation step, not as lmer weights.
 .fit_lmer_model <- function(formula, data, control) {
@@ -374,8 +348,6 @@ utils::globalVariables(c(
 #'   synthetic estimates, bias corrections, and sample counts.}
 #'   \item{\code{diagnostics}}{Model diagnostics including ICC, singular-fit
 #'   status, prediction mode, convergence message, sigma, AIC, and BIC.}
-#'   \item{\code{scaling_info}}{Parameters used for internal numeric
-#'   standardization.}
 #'   \item{\code{notes}}{Concise run-specific notes and warning conditions.}
 #'   \item{\code{unit_projection}}{Returned when \code{keep_unit = TRUE}.}
 #'   \item{\code{unit_model_residual}}{Returned when \code{keep_unit = TRUE}.}
@@ -503,7 +475,7 @@ sae_ml_linear <- function(
   data_model <- harmonized$data_model
   data_proj <- harmonized$data_proj
 
-  # -- 3. Zero-variance predictors & standardization ---------------------------
+  # -- 3. Zero-variance predictors ---------------------------------------------
   zv_vars <- Filter(function(v) length(unique(data_model[[v]])) == 1L, fixed_vars)
 
   if (length(zv_vars) > 0L) {
@@ -523,11 +495,6 @@ sae_ml_linear <- function(
     )
     fixed_vars <- setdiff(fixed_vars, zv_vars)
   }
-
-  scaled <- .standardize_numeric(data_model, data_proj, fixed_vars)
-  data_model <- scaled$data_model
-  data_proj <- scaled$data_proj
-  scaling_info <- scaled$scaling_info
 
   # -- 4. Model fitting & diagnostics -----------------------------------------
   set.seed(seed)
@@ -683,7 +650,6 @@ sae_ml_linear <- function(
     estimates = estimates,
     estimation_details = estimation_details,
     diagnostics = diagnostics,
-    scaling_info = scaling_info,
     notes = unique(notes)
   )
 
