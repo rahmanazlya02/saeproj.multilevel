@@ -497,10 +497,14 @@ variance_final = variance_synthetic + variance_correction
 
 ## References
 
-Kim, J. K. and Rao, J. N. K. (2012). Combining data from two independent surveys: a model-assisted approach. *Biometrika*, 99(1), 85–100.
+Kim, J. K. and Rao, J. N. K. (2012). Combining data from two independent surveys: a model-assisted approach. *Biometrika*, 99(1), 85–100. 
+
 Moura, F. A. S. and Holt, D. (1999). Small area estimation using multilevel models. *Survey Methodology*, 25(1), 73–80.
+
 Bates, D., Maechler, M., Bolker, B. and Walker, S. (2015). Fitting linear mixed-effects models using lme4. *Journal of Statistical Software*, 67(1), 1–48.
+
 Lumley, T. (2010). *Complex Surveys: A Guide to Analysis Using R*. Wiley.
+
 Rao, J. N. K. and Molina, I. (2015). *Small Area Estimation* (2nd ed.). Wiley.
 
 ## License

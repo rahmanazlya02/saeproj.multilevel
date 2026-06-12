@@ -1,12 +1,6 @@
 # R/sae_ml_linear.R
 # Small Area Estimation via Projection Estimator using Linear Multilevel Working Model
 #
-# References:
-#   Kim & Rao (2012). Biometrika, 99(1), 85-100.
-#   Moura & Holt (1999). Survey Methodology, 25(1), 73-80.
-#   Bates et al. (2015). Journal of Statistical Software, 67(1), 1-48.
-#   Lumley (2010). Complex Surveys. Wiley.
-
 # ---- Setup ------------------------------------------------------------------
 
 utils::globalVariables(c(
