@@ -14,100 +14,62 @@ sae_ml_linear(
   strata = NULL,
   summary_function = "mean",
   keep_unit = FALSE,
-  seed = 1,
+  seed = 1L,
   control = lme4::lmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e+05)),
   return_direct = FALSE,
   ...
 )
 }
 \arguments{
-\item{formula}{An \code{lme4::lmer()}-style formula, for example
-\code{y ~ x1 + x2 + (1 | area)}.}
+\item{formula}{An \code{lme4::lmer()}-style formula.}
 
-\item{data_model}{Data frame for the smaller model survey. Must contain the
-response, all predictors, grouping variables, domain variable(s), and survey
-design variables.}
+\item{data_model}{Data frame for the model survey.}
 
-\item{data_proj}{Data frame for the larger projection survey. Must contain all
-predictors, domain variable(s), and survey design variables. The response
-variable is not required.}
+\item{data_proj}{Data frame for the projection survey.}
 
-\item{domain}{Domain variable name(s): a character scalar, character vector,
-or a one-sided formula.}
+\item{domain}{Domain variable name(s): character vector or one-sided formula.}
 
-\item{cluster_ids}{Cluster or PSU variable for survey design. Character,
-formula, or \code{~1}.}
+\item{cluster_ids}{Cluster or PSU variable for survey design.}
 
-\item{weight}{Survey weight variable. Character scalar, one-sided formula, or
-\code{NULL}. The variable name must exist in both \code{data_model} and
-\code{data_proj}; the values may differ between datasets.}
+\item{weight}{Survey weight variable.}
 
-\item{strata}{Stratification variable. Character, formula, or \code{NULL}.}
+\item{strata}{Stratification variable.}
 
-\item{summary_function}{Aggregation function for the domain level:
-\code{"mean"} or \code{"total"}.}
+\item{summary_function}{Aggregation function: \code{"mean"} or \code{"total"}.}
 
-\item{keep_unit}{Logical. If \code{TRUE}, unit-level predictions and model
-residuals are returned.}
+\item{keep_unit}{Logical. If \code{TRUE}, unit-level data are returned.}
 
 \item{seed}{Integer seed for reproducibility.}
 
 \item{control}{Control object passed to \code{\link[lme4]{lmerControl}}.}
 
-\item{return_direct}{Logical. If \code{TRUE}, returns direct survey estimators
-based on \code{data_model}.}
+\item{return_direct}{Logical. If \code{TRUE}, returns direct survey estimates.}
 
 \item{...}{Additional arguments passed to \code{\link[survey]{svydesign}}.}
 }
 \value{
-An object of class \code{"sae_ml_linear"}, a list with:
-\describe{
-\item{\code{call}}{The matched call.}
-\item{\code{formula}}{The model formula.}
-\item{\code{estimator}}{The estimator type used; always
-\code{"bias_corrected"}.}
-\item{\code{fitted_model}}{The fitted \code{lmerMod} object.}
-\item{\code{estimates}}{Domain-level estimates with columns for domain
-variable(s), \code{estimate}, \code{variance}, \code{se}, and \code{rse}.}
-\item{\code{estimation_details}}{Extended domain-level components including
-synthetic estimates, bias corrections, and sample counts.}
-\item{\code{diagnostics}}{Model diagnostics including ICC, singular-fit
-status, prediction mode, convergence message, sigma, AIC, and BIC.}
-\item{\code{notes}}{Concise run-specific notes and warning conditions.}
-\item{\code{unit_projection}}{Returned when \code{keep_unit = TRUE}.}
-\item{\code{unit_model_residual}}{Returned when \code{keep_unit = TRUE}.}
-\item{\code{direct_estimator}}{Returned when
-\code{return_direct = TRUE}.}
-}
+An object of class \code{"sae_ml_linear"}.
 }
 \description{
-Implements the projection estimator for Small Area Estimation (SAE) using a
+Implements a projection estimator for Small Area Estimation (SAE) using a
 linear mixed-effects working model fitted with \code{\link[lme4]{lmer}}.
-
-The function fits the working model on \code{data_model}, generates synthetic
-predictions on \code{data_proj}, and aggregates predictions to domain-level
-means or totals using survey design information.
 }
 \details{
-The estimator combines synthetic prediction from a multilevel model,
-design-based residual bias correction, adaptive prediction using ICC
-diagnostics, and survey-weighted domain aggregation.
+The model formula is fully specified by the user using \code{lme4::lmer()}
+syntax. The function fits the working model on \code{data_model}, predicts
+the response for all units in \code{data_proj}, and aggregates predictions
+to domain-level means or totals using survey design information.
 
-Survey design variables, including \code{cluster_ids}, \code{weight}, and
-\code{strata}, are used in the design-based aggregation and residual
-correction steps through \code{\link[survey]{svydesign}}. The linear
-mixed-effects working model is fitted with \code{\link[lme4]{lmer}} and does
-not treat survey weights as full survey-design weights.
+Prediction uses \code{re.form = NULL} and \code{allow.new.levels = TRUE}.
+For grouping levels present in \code{data_model}, predictions include the
+estimated random-effect contribution. For grouping levels appearing only in
+\code{data_proj}, the random-effect contribution is set to zero.
 
-Conditional prediction is used when ICC is at least \code{0.05} and the fitted
-model is not singular. Otherwise, fixed-effect-only prediction is used
-through \code{re.form = NA}. New grouping levels in \code{data_proj} are
-allowed during prediction.
+Survey design variables are used in design-based aggregation and residual
+correction. They are not passed as weights to \code{lme4::lmer()}.
 
-The plug-in variance for the bias-corrected estimator is computed as
-\code{Var(final estimate) = Var(synthetic estimate) + Var(residual correction)}.
-This approximation assumes \code{data_model} and \code{data_proj} are
-independent, or treated as independent, and does not fully account for
+The plug-in variance is computed as the sum of the synthetic component
+variance and residual correction variance. It does not account for
 mixed-model parameter uncertainty.
 }
 \examples{
@@ -118,15 +80,8 @@ result <- sae_ml_linear(
   data_proj = survey_proj,
   domain = "kabkot",
   weight = "w",
-  summary_function = "mean",
-  nest = TRUE
+  summary_function = "mean"
 )
-
-print(result)
-summary(result)
-as.data.frame(result)
-result$estimation_details
-result$notes
 }
 
 }

@@ -9,28 +9,27 @@
 
 # ---- Setup ------------------------------------------------------------------
 
-# Suppress R CMD check NOTE for internal data.frame column variables.
 utils::globalVariables(c(
-  "bias", "var_bias", "ypr", "var_ypr", "estimate",
-  "variance", "se", "rse", ".y_hat", ".resid", ".y_hat_model"
+  "estimate", "variance", "se", "rse",
+  ".prediction", ".fitted_model", ".model_residual"
 ))
 
 # ---- Internal helpers --------------------------------------------------------
 
 #' @noRd
-# Extracts the response variable from a mixed-effects formula.
+# Extract the response variable from a mixed-effects formula.
 .get_response_var <- function(formula) {
   all.vars(reformulas::nobars(formula))[1L]
 }
 
 #' @noRd
-# Extracts fixed-effect variables from a mixed-effects formula.
+# Extract fixed-effect variables from a mixed-effects formula.
 .get_fixed_vars <- function(formula) {
   setdiff(all.vars(reformulas::nobars(formula)), .get_response_var(formula))
 }
 
 #' @noRd
-# Extracts grouping variables from random-effect terms.
+# Extract grouping variables from random-effect terms.
 .get_group_vars <- function(formula) {
   bars <- reformulas::findbars(formula)
   if (length(bars) == 0L) return(character(0L))
@@ -38,7 +37,23 @@ utils::globalVariables(c(
 }
 
 #' @noRd
-# Checks required variables for missing values.
+# Check that required variables exist in a data frame.
+.check_required_columns <- function(data, vars, data_name) {
+  vars <- unique(vars[!is.na(vars) & nzchar(vars)])
+  missing <- setdiff(vars, names(data))
+
+  if (length(missing) > 0L) {
+    cli::cli_abort(paste0(
+      "Required variable(s) not found in `", data_name, "`: ",
+      paste(missing, collapse = ", "), "."
+    ))
+  }
+
+  invisible(TRUE)
+}
+
+#' @noRd
+# Check required variables for missing values.
 .check_missing_values <- function(data, vars, data_name) {
   vars <- intersect(unique(vars), names(data))
   if (length(vars) == 0L) return(invisible(TRUE))
@@ -58,23 +73,7 @@ utils::globalVariables(c(
 }
 
 #' @noRd
-# Checks that required variables exist in a data frame.
-.check_required_columns <- function(data, vars, data_name) {
-  vars <- unique(vars[!is.na(vars) & nzchar(vars)])
-  missing <- setdiff(vars, names(data))
-
-  if (length(missing) > 0L) {
-    cli::cli_abort(paste0(
-      "Required variable(s) not found in `", data_name, "`: ",
-      paste(missing, collapse = ", "), "."
-    ))
-  }
-
-  invisible(TRUE)
-}
-
-#' @noRd
-# Validates a design/domain variable and converts character input to formula.
+# Validate a survey design or domain variable and convert character input to formula.
 .check_variable <- function(variable, data_model, data_proj, arg_name = "variable") {
   if (is.null(variable)) return(NULL)
 
@@ -127,11 +126,12 @@ utils::globalVariables(c(
 }
 
 #' @noRd
-# Harmonizes categorical fixed-effect and grouping levels across datasets.
+# Harmonize factor levels across datasets.
 .harmonize_levels <- function(formula, data_model, data_proj) {
   fixed_vars <- .get_fixed_vars(formula)
   group_vars <- .get_group_vars(formula)
 
+  # Fixed-effect levels in data_proj must already exist in data_model.
   for (v in fixed_vars) {
     if (is.factor(data_model[[v]]) || is.character(data_model[[v]])) {
       train_levels <- unique(as.character(data_model[[v]]))
@@ -150,6 +150,7 @@ utils::globalVariables(c(
     }
   }
 
+  # New grouping levels in data_proj are allowed.
   for (v in group_vars) {
     model_levels <- unique(as.character(data_model[[v]]))
     proj_levels <- unique(as.character(data_proj[[v]]))
@@ -163,30 +164,37 @@ utils::globalVariables(c(
 }
 
 #' @noRd
-# Fits the linear mixed-effects working model.
-# Survey weights are used in the design-based aggregation step, not as lmer weights.
+# Fit the linear mixed-effects working model.
 .fit_lmer_model <- function(formula, data, control) {
   lme4::lmer(
     formula = formula,
     data = data,
-    REML = FALSE,
+    REML = TRUE,
     control = control
   )
 }
 
 #' @noRd
-# Extracts model diagnostics and determines prediction mode.
+# Extract model diagnostics from a fitted lmerMod object.
 .get_lmer_diagnostics <- function(fit) {
   vc <- lme4::VarCorr(fit)
-  var_u <- sum(unlist(lapply(vc, function(x) diag(as.matrix(x)))))
+  vc_df <- as.data.frame(vc)
+
   var_e <- stats::sigma(fit)^2
-  icc <- var_u / (var_u + var_e)
   singular_fit <- lme4::isSingular(fit)
 
-  prediction_mode <- if (!is.na(icc) && icc >= 0.05 && !singular_fit) {
-    "conditional"
+  vcov_list <- lapply(vc, as.matrix)
+  random_effect_groups <- names(vc)
+  random_effect_dims <- vapply(vcov_list, ncol, integer(1L))
+  is_random_intercept_only <- all(random_effect_dims == 1L)
+
+  if (is_random_intercept_only) {
+    var_u <- sum(vapply(vcov_list, function(x) x[1L, 1L], numeric(1L)))
+    icc <- var_u / (var_u + var_e)
+    icc_note <- "ICC computed for random-intercept structure."
   } else {
-    "fixed_only"
+    icc <- NA_real_
+    icc_note <- "Simple ICC is not computed for random-slope or complex random-effect structure."
   }
 
   convergence <- fit@optinfo$conv$lme4$messages
@@ -197,19 +205,38 @@ utils::globalVariables(c(
   }
 
   list(
-    icc = icc,
-    singular_fit = singular_fit,
-    prediction_mode = prediction_mode,
-    convergence = convergence,
     sigma = stats::sigma(fit),
+    residual_variance = var_e,
+    random_effects = vc_df,
+    random_effect_groups = random_effect_groups,
+    random_effect_dims = random_effect_dims,
+    is_random_intercept_only = is_random_intercept_only,
+    icc = icc,
+    icc_note = icc_note,
+    singular_fit = singular_fit,
+    convergence = convergence,
     nobs = stats::nobs(fit),
+    REML = lme4::isREML(fit),
+    logLik = as.numeric(stats::logLik(fit)),
     AIC = stats::AIC(fit),
     BIC = stats::BIC(fit)
   )
 }
 
 #' @noRd
-# Builds a survey design object for domain aggregation.
+# Extract fixed effects, random effects, and variance components.
+.get_model_parameters <- function(fit) {
+  list(
+    fixed_effects = lme4::fixef(fit),
+    random_effects = lme4::ranef(fit),
+    variance_components = as.data.frame(lme4::VarCorr(fit)),
+    residual_sd = stats::sigma(fit),
+    residual_variance = stats::sigma(fit)^2
+  )
+}
+
+#' @noRd
+# Build a survey design object for domain aggregation.
 .make_survey_design <- function(data, ids, weights, strata, ...) {
   if (is.null(ids)) ids <- ~1
 
@@ -223,7 +250,7 @@ utils::globalVariables(c(
 }
 
 #' @noRd
-# Renames survey::svyby output columns consistently.
+# Rename survey::svyby output columns consistently.
 .rename_svyby <- function(x, domain_vars, value_col, estimate_name, variance_name) {
   if (value_col %in% names(x)) {
     names(x)[names(x) == value_col] <- estimate_name
@@ -244,7 +271,7 @@ utils::globalVariables(c(
 }
 
 #' @noRd
-# Computes optional direct design-based estimates.
+# Compute optional direct design-based estimates.
 .get_direct_estimator <- function(response_var, domain_formula, domain_chr, design, FUN) {
   direct <- survey::svyby(
     formula = stats::as.formula(paste0("~", response_var)),
@@ -268,7 +295,7 @@ utils::globalVariables(c(
 }
 
 #' @noRd
-# Computes unweighted row counts by domain.
+# Compute unweighted row counts by domain.
 .domain_counts <- function(data, domain_chr, col_name) {
   out <- stats::aggregate(rep(1L, nrow(data)), data[domain_chr], length)
   names(out)[ncol(out)] <- col_name
@@ -280,80 +307,42 @@ utils::globalVariables(c(
 #' Small Area Estimation via Projection Estimator with Linear Multilevel Model
 #'
 #' @description
-#' Implements the projection estimator for Small Area Estimation (SAE) using a
+#' Implements a projection estimator for Small Area Estimation (SAE) using a
 #' linear mixed-effects working model fitted with \code{\link[lme4]{lmer}}.
 #'
-#' The function fits the working model on \code{data_model}, generates synthetic
-#' predictions on \code{data_proj}, and aggregates predictions to domain-level
-#' means or totals using survey design information.
-#'
 #' @details
-#' The estimator combines synthetic prediction from a multilevel model,
-#' design-based residual bias correction, adaptive prediction using ICC
-#' diagnostics, and survey-weighted domain aggregation.
+#' The model formula is fully specified by the user using \code{lme4::lmer()}
+#' syntax. The function fits the working model on \code{data_model}, predicts
+#' the response for all units in \code{data_proj}, and aggregates predictions
+#' to domain-level means or totals using survey design information.
 #'
-#' Survey design variables, including \code{cluster_ids}, \code{weight}, and
-#' \code{strata}, are used in the design-based aggregation and residual
-#' correction steps through \code{\link[survey]{svydesign}}. The linear
-#' mixed-effects working model is fitted with \code{\link[lme4]{lmer}} and does
-#' not treat survey weights as full survey-design weights.
+#' Prediction uses \code{re.form = NULL} and \code{allow.new.levels = TRUE}.
+#' For grouping levels present in \code{data_model}, predictions include the
+#' estimated random-effect contribution. For grouping levels appearing only in
+#' \code{data_proj}, the random-effect contribution is set to zero.
 #'
-#' Conditional prediction is used when ICC is at least \code{0.05} and the fitted
-#' model is not singular. Otherwise, fixed-effect-only prediction is used
-#' through \code{re.form = NA}. New grouping levels in \code{data_proj} are
-#' allowed during prediction.
+#' Survey design variables are used in design-based aggregation and residual
+#' correction. They are not passed as weights to \code{lme4::lmer()}.
 #'
-#' The plug-in variance for the bias-corrected estimator is computed as
-#' \code{Var(final estimate) = Var(synthetic estimate) + Var(residual correction)}.
-#' This approximation assumes \code{data_model} and \code{data_proj} are
-#' independent, or treated as independent, and does not fully account for
+#' The plug-in variance is computed as the sum of the synthetic component
+#' variance and residual correction variance. It does not account for
 #' mixed-model parameter uncertainty.
 #'
-#' @param formula An \code{lme4::lmer()}-style formula, for example
-#'   \code{y ~ x1 + x2 + (1 | area)}.
-#' @param data_model Data frame for the smaller model survey. Must contain the
-#'   response, all predictors, grouping variables, domain variable(s), and survey
-#'   design variables.
-#' @param data_proj Data frame for the larger projection survey. Must contain all
-#'   predictors, domain variable(s), and survey design variables. The response
-#'   variable is not required.
-#' @param domain Domain variable name(s): a character scalar, character vector,
-#'   or a one-sided formula.
-#' @param cluster_ids Cluster or PSU variable for survey design. Character,
-#'   formula, or \code{~1}.
-#' @param weight Survey weight variable. Character scalar, one-sided formula, or
-#'   \code{NULL}. The variable name must exist in both \code{data_model} and
-#'   \code{data_proj}; the values may differ between datasets.
-#' @param strata Stratification variable. Character, formula, or \code{NULL}.
-#' @param summary_function Aggregation function for the domain level:
-#'   \code{"mean"} or \code{"total"}.
-#' @param keep_unit Logical. If \code{TRUE}, unit-level predictions and model
-#'   residuals are returned.
+#' @param formula An \code{lme4::lmer()}-style formula.
+#' @param data_model Data frame for the model survey.
+#' @param data_proj Data frame for the projection survey.
+#' @param domain Domain variable name(s): character vector or one-sided formula.
+#' @param cluster_ids Cluster or PSU variable for survey design.
+#' @param weight Survey weight variable.
+#' @param strata Stratification variable.
+#' @param summary_function Aggregation function: \code{"mean"} or \code{"total"}.
+#' @param keep_unit Logical. If \code{TRUE}, unit-level data are returned.
 #' @param seed Integer seed for reproducibility.
 #' @param control Control object passed to \code{\link[lme4]{lmerControl}}.
-#' @param return_direct Logical. If \code{TRUE}, returns direct survey estimators
-#'   based on \code{data_model}.
+#' @param return_direct Logical. If \code{TRUE}, returns direct survey estimates.
 #' @param ... Additional arguments passed to \code{\link[survey]{svydesign}}.
 #'
-#' @return An object of class \code{"sae_ml_linear"}, a list with:
-#' \describe{
-#'   \item{\code{call}}{The matched call.}
-#'   \item{\code{formula}}{The model formula.}
-#'   \item{\code{estimator}}{The estimator type used; always
-#'   \code{"bias_corrected"}.}
-#'   \item{\code{fitted_model}}{The fitted \code{lmerMod} object.}
-#'   \item{\code{estimates}}{Domain-level estimates with columns for domain
-#'   variable(s), \code{estimate}, \code{variance}, \code{se}, and \code{rse}.}
-#'   \item{\code{estimation_details}}{Extended domain-level components including
-#'   synthetic estimates, bias corrections, and sample counts.}
-#'   \item{\code{diagnostics}}{Model diagnostics including ICC, singular-fit
-#'   status, prediction mode, convergence message, sigma, AIC, and BIC.}
-#'   \item{\code{notes}}{Concise run-specific notes and warning conditions.}
-#'   \item{\code{unit_projection}}{Returned when \code{keep_unit = TRUE}.}
-#'   \item{\code{unit_model_residual}}{Returned when \code{keep_unit = TRUE}.}
-#'   \item{\code{direct_estimator}}{Returned when
-#'   \code{return_direct = TRUE}.}
-#' }
+#' @return An object of class \code{"sae_ml_linear"}.
 #'
 #' @references
 #' Kim, J. K. and Rao, J. N. K. (2012). Combining data from two independent
@@ -376,22 +365,16 @@ utils::globalVariables(c(
 #'   data_proj = survey_proj,
 #'   domain = "kabkot",
 #'   weight = "w",
-#'   summary_function = "mean",
-#'   nest = TRUE
+#'   summary_function = "mean"
 #' )
-#'
-#' print(result)
-#' summary(result)
-#' as.data.frame(result)
-#' result$estimation_details
-#' result$notes
 #' }
 #'
 #' @importFrom survey svydesign svyby svymean svytotal
 #' @importFrom cli cli_abort cli_warn
 #' @importFrom dplyr left_join
+#' @importFrom lme4 lmer lmerControl VarCorr fixef ranef isSingular isREML
 #' @importFrom reformulas findbars nobars
-#' @importFrom stats AIC BIC aggregate as.formula model.frame predict sd sigma update
+#' @importFrom stats AIC BIC aggregate as.formula logLik model.frame predict sigma update
 #' @importFrom utils head globalVariables
 #'
 #' @export
@@ -405,7 +388,7 @@ sae_ml_linear <- function(
     strata = NULL,
     summary_function = "mean",
     keep_unit = FALSE,
-    seed = 1,
+    seed = 1L,
     control = lme4::lmerControl(
       optimizer = "bobyqa",
       optCtrl = list(maxfun = 2e5)
@@ -414,9 +397,9 @@ sae_ml_linear <- function(
     ...
 ) {
   mc <- match.call()
-  estimator_type <- "bias_corrected"
   notes <- character(0L)
 
+  # -- 0. Basic type checks ----------------------------------------------------
   if (!is.data.frame(data_model)) {
     cli::cli_abort("`data_model` must be a data.frame.")
   }
@@ -434,48 +417,48 @@ sae_ml_linear <- function(
   weight <- .check_variable(weight, data_model, data_proj, "weight")
   strata <- .check_variable(strata, data_model, data_proj, "strata")
   domain_formula <- .check_variable(domain, data_model, data_proj, "domain")
+
   if (!is.null(weight) && length(all.vars(weight)) != 1L) {
     cli::cli_abort("`weight` must identify exactly one survey weight variable.")
   }
+
   domain_chr <- all.vars(domain_formula)
-  if (length(domain_chr) == 0L) {
-    cli::cli_abort("`domain` must identify at least one domain variable.")
-  }
   response_var <- .get_response_var(formula)
   fixed_vars <- .get_fixed_vars(formula)
   group_vars <- .get_group_vars(formula)
 
-  if (length(group_vars) == 0L) {
-    cli::cli_abort("`formula` must contain at least one random effect.")
+  if (length(domain_chr) == 0L) {
+    cli::cli_abort("`domain` must identify at least one domain variable.")
   }
 
-  y <- data_model[[response_var]]
+  if (length(group_vars) == 0L) {
+    cli::cli_abort("`formula` must contain at least one random effect, e.g. `(1 | area)`.")
+  }
 
   summary_function <- match.arg(summary_function, c("mean", "total"))
-  FUN <- switch(
-    summary_function,
-    mean = survey::svymean,
-    total = survey::svytotal
-  )
+  FUN <- switch(summary_function, mean = survey::svymean, total = survey::svytotal)
 
-  # -- 2. Missing values & level harmonization --------------------------------
+  # -- 2. Column presence & missing value checks -------------------------------
   req_model <- unique(c(
     response_var, fixed_vars, group_vars, domain_chr,
     all.vars(cluster_ids), all.vars(weight), all.vars(strata)
   ))
+
   req_proj <- setdiff(req_model, response_var)
 
   .check_required_columns(data_model, req_model, "data_model")
   .check_required_columns(data_proj, req_proj, "data_proj")
-
   .check_missing_values(data_model, req_model, "data_model")
   .check_missing_values(data_proj, req_proj, "data_proj")
 
+  # -- 3. Level harmonization --------------------------------------------------
   harmonized <- .harmonize_levels(formula, data_model, data_proj)
   data_model <- harmonized$data_model
   data_proj <- harmonized$data_proj
 
-  # -- 3. Zero-variance predictors ---------------------------------------------
+  y <- data_model[[response_var]]
+
+  # -- 4. Zero-variance predictor removal -------------------------------------
   zv_vars <- Filter(function(v) length(unique(data_model[[v]])) == 1L, fixed_vars)
 
   if (length(zv_vars) > 0L) {
@@ -493,129 +476,121 @@ sae_ml_linear <- function(
       formula,
       stats::as.formula(paste("~ . -", paste(zv_vars, collapse = " - ")))
     )
+
     fixed_vars <- setdiff(fixed_vars, zv_vars)
   }
 
-  # -- 4. Model fitting & diagnostics -----------------------------------------
+  # -- 5. Model fitting --------------------------------------------------------
   set.seed(seed)
   fit <- .fit_lmer_model(formula, data_model, control)
-  diagnostics <- .get_lmer_diagnostics(fit)
 
-  re_form_use <- if (identical(diagnostics$prediction_mode, "conditional")) NULL else NA
+  diagnostics <- .get_lmer_diagnostics(fit)
+  model_parameters <- .get_model_parameters(fit)
 
   if (isTRUE(diagnostics$singular_fit)) {
-    cli::cli_warn("Singular fit detected. Consider simplifying the random-effect structure.")
+    cli::cli_warn("Singular fit detected.")
     notes <- c(notes, "Singular fit detected.")
   }
 
   if (!identical(diagnostics$convergence, "OK")) {
-    cli::cli_warn(paste0("Convergence issue detected: ", diagnostics$convergence))
+    cli::cli_warn(paste0("Convergence issue: ", diagnostics$convergence))
     notes <- c(notes, paste0("Convergence issue: ", diagnostics$convergence))
   }
 
-  if (!is.na(diagnostics$icc) && diagnostics$icc < 0.05) {
-    cli::cli_warn(paste0(
-      "Low ICC detected (ICC = ", round(diagnostics$icc, 4L),
-      "). Fixed-effect-only prediction is used."
-    ))
-    notes <- c(notes, paste0("Low ICC detected: ", round(diagnostics$icc, 4L), "."))
+  if (!diagnostics$is_random_intercept_only) {
+    notes <- c(notes, diagnostics$icc_note)
   }
 
-  if (identical(diagnostics$prediction_mode, "fixed_only")) {
-    notes <- c(notes, "Fixed-effect-only prediction used.")
-  }
-
-  # -- 5. Prediction & survey design ------------------------------------------
-  data_proj$.y_hat <- stats::predict(
+  # -- 6. Prediction -----------------------------------------------------------
+  data_proj$.prediction <- stats::predict(
     fit,
     newdata = data_proj,
-    re.form = re_form_use,
+    re.form = NULL,
     allow.new.levels = TRUE
   )
 
-  data_model$.y_hat_model <- stats::predict(
+  data_model$.fitted_model <- stats::predict(
     fit,
     newdata = data_model,
-    re.form = re_form_use,
+    re.form = NULL,
     allow.new.levels = TRUE
   )
 
-  data_model$.resid <- y - data_model$.y_hat_model
+  data_model$.model_residual <- y - data_model$.fitted_model
 
+  # -- 7. Survey designs -------------------------------------------------------
   svy_model <- .make_survey_design(data_model, cluster_ids, weight, strata, ...)
   svy_proj <- .make_survey_design(data_proj, cluster_ids, weight, strata, ...)
 
-  # -- 6. Synthetic estimator & bias correction --------------------------------
+  # -- 8. Synthetic estimate & bias correction ---------------------------------
   est_bias <- survey::svyby(
-    formula = ~.resid,
+    formula = ~.model_residual,
     by = domain_formula,
     design = svy_model,
     FUN = FUN,
     vartype = "var",
     na.rm = TRUE
   )
+
   est_bias <- .rename_svyby(
     est_bias,
     domain_vars = domain_chr,
-    value_col = ".resid",
+    value_col = ".model_residual",
     estimate_name = "correction",
     variance_name = "variance_correction"
   )
 
   est_ypr <- survey::svyby(
-    formula = ~.y_hat,
+    formula = ~.prediction,
     by = domain_formula,
     design = svy_proj,
     FUN = FUN,
     vartype = "var",
     na.rm = TRUE
   )
+
   est_ypr <- .rename_svyby(
     est_ypr,
     domain_vars = domain_chr,
-    value_col = ".y_hat",
+    value_col = ".prediction",
     estimate_name = "estimate_synthetic",
     variance_name = "variance_synthetic"
   )
 
-  # -- 7. Final estimates ------------------------------------------------------
+  # -- 9. Combine & final estimates --------------------------------------------
   df_result <- dplyr::left_join(est_ypr, est_bias, by = domain_chr)
 
-  no_corr <- df_result[is.na(df_result$correction), domain_chr, drop = FALSE]
+  no_corr_idx <- is.na(df_result$correction)
 
-  if (nrow(no_corr) > 0L) {
-    cli::cli_warn(paste0(
-      nrow(no_corr),
-      " domain(s) have no residual correction from data_model; correction is set to zero."
-    ))
+  if (any(no_corr_idx)) {
+    n_no_corr <- sum(no_corr_idx)
 
     notes <- c(notes, paste0(
-      nrow(no_corr),
-      " domain(s) have no residual correction; correction set to zero."
+      n_no_corr,
+      " out-of-sample domain(s): correction set to zero."
     ))
-  }
 
-  df_result$correction[is.na(df_result$correction)] <- 0
-  df_result$variance_correction[is.na(df_result$variance_correction)] <- 0
+    df_result$correction[no_corr_idx] <- 0
+    df_result$variance_correction[no_corr_idx] <- 0
+  }
 
   estimate_final <- df_result$estimate_synthetic + df_result$correction
   variance_raw <- df_result$variance_synthetic + df_result$variance_correction
+
   neg_var_idx <- which(!is.na(variance_raw) & variance_raw < 0)
 
   if (length(neg_var_idx) > 0L) {
-    cli::cli_warn(paste0(
-      length(neg_var_idx),
-      " domain(s) have negative plug-in variance; values are clamped to zero."
-    ))
+    cli::cli_warn("Negative plug-in variance detected; clamped to zero.")
 
     notes <- c(notes, paste0(
       length(neg_var_idx),
-      " domain(s) have negative variance clamped to zero."
+      " domain(s): negative variance clamped to zero."
     ))
   }
 
   variance_final <- pmax(variance_raw, 0)
   se_final <- sqrt(variance_final)
+
   rse_final <- ifelse(
     estimate_final == 0,
     NA_real_,
@@ -636,17 +611,20 @@ sae_ml_linear <- function(
   estimation_details$variance_final <- variance_final
   estimation_details$se_final <- se_final
   estimation_details$rse_final <- rse_final
+
   estimation_details <- dplyr::left_join(estimation_details, n_model, by = domain_chr)
   estimation_details <- dplyr::left_join(estimation_details, n_proj, by = domain_chr)
+
   estimation_details$n_model[is.na(estimation_details$n_model)] <- 0L
   estimation_details$n_proj[is.na(estimation_details$n_proj)] <- 0L
 
-  # -- 8. Output assembly ------------------------------------------------------
+  # -- 10. Output assembly -----------------------------------------------------
   out <- list(
     call = mc,
     formula = formula,
-    estimator = estimator_type,
+    estimator = "bias_corrected",
     fitted_model = fit,
+    model_parameters = model_parameters,
     estimates = estimates,
     estimation_details = estimation_details,
     diagnostics = diagnostics,
@@ -685,52 +663,45 @@ sae_ml_linear <- function(
 #' @method print sae_ml_linear
 print.sae_ml_linear <- function(x, n = 6L, ...) {
   cat("SAE Projection Estimator using Linear Multilevel Model\n")
-  cat("---------------------------------------------------\n")
+  cat("-------------------------------------------------------\n")
   cat("Formula   :", deparse(x$formula), "\n")
   cat("Estimator :", x$estimator, "\n")
   cat("Domains   :", nrow(x$estimates), "\n\n")
-  cat("Estimates (first", min(n, nrow(x$estimates)), "rows):\n")
+
+  cat("Estimates:\n")
   print(utils::head(x$estimates, n), row.names = FALSE)
+
   invisible(x)
 }
 
 #' Summary method for sae_ml_linear
 #'
 #' @param object Object of class \code{"sae_ml_linear"}.
+#' @param n Number of rows to display.
 #' @param ... Further arguments.
 #'
 #' @return Invisibly returns \code{object}.
 #'
 #' @export
 #' @method summary sae_ml_linear
-summary.sae_ml_linear <- function(object, ...) {
-  cat("SAE Projection Estimator using Linear Multilevel Model\n\n")
-  cat("Call:\n")
-  print(object$call)
-  cat("\n")
+summary.sae_ml_linear <- function(object, n = 6L, ...) {
+  cat("SAE Projection Estimator using Linear Multilevel Model\n")
+  cat("-------------------------------------------------------\n")
   cat("Formula   :", deparse(object$formula), "\n")
-  cat("Estimator :", object$estimator, "\n\n")
+  cat("Estimator :", object$estimator, "\n")
+  cat("Domains   :", nrow(object$estimates), "\n\n")
 
-  cat("Working model:\n")
-  print(summary(object$fitted_model))
-
-  cat("\nDiagnostics:\n")
-  cat("  sigma       :", round(object$diagnostics$sigma, 4L), "\n")
+  cat("Model diagnostics:\n")
   cat("  nobs        :", object$diagnostics$nobs, "\n")
-  cat("  ICC         :", if (is.na(object$diagnostics$icc)) "NA" else round(object$diagnostics$icc, 4L), "\n")
-  cat("  pred_mode   :", object$diagnostics$prediction_mode, "\n")
+  cat("  sigma       :", round(object$diagnostics$sigma, 4L), "\n")
+  cat("  ICC         :",
+      if (is.na(object$diagnostics$icc)) "NA" else round(object$diagnostics$icc, 4L),
+      "\n")
   cat("  singular    :", object$diagnostics$singular_fit, "\n")
   cat("  convergence :", object$diagnostics$convergence, "\n\n")
 
-  cat("Final estimates:\n")
-  print(utils::head(object$estimates), row.names = FALSE)
-  cat("\n")
-
-  if (!is.null(object$notes) && length(object$notes) > 0L) {
-    cat("Notes:\n")
-    for (note in object$notes) cat(" *", note, "\n")
-    cat("\n")
-  }
+  cat("Estimates:\n")
+  print(utils::head(object$estimates, n), row.names = FALSE)
 
   invisible(object)
 }

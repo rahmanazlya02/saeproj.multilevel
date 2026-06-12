@@ -68,7 +68,7 @@ test_that("runs with random intercept", {
 test_that("runs with random slope", {
   d <- make_test_data()
 
-  expect_no_error(
+  res <- suppressWarnings(
     sae_ml_linear(
       formula = y ~ x1 + x2 + (1 + x1 | area),
       data_model = d$data_model,
@@ -77,6 +77,10 @@ test_that("runs with random slope", {
       weight = "weight"
     )
   )
+
+  expect_s3_class(res, "sae_ml_linear")
+  expect_true(is.na(res$diagnostics$icc))
+  expect_false(res$diagnostics$is_random_intercept_only)
 })
 
 test_that("data_proj can have new random effect levels", {
@@ -88,10 +92,15 @@ test_that("data_proj can have new random effect levels", {
     data_model = d$data_model,
     data_proj = d$data_proj,
     domain = "domain",
-    weight = "weight"
+    weight = "weight",
+    keep_unit = TRUE
   )
 
+  idx_new <- d$data_proj$area == "A7"
+
   expect_s3_class(res, "sae_ml_linear")
+  expect_true(any(idx_new))
+  expect_true(all(is.finite(res$unit_projection$.prediction[idx_new])))
 })
 
 test_that("formula without random effect fails", {
@@ -225,7 +234,7 @@ test_that("print, summary, and as.data.frame methods work", {
   )
 
   expect_output(print(res), "SAE Projection Estimator")
-  expect_output(summary(res), "Diagnostics")
+  expect_output(summary(res), "Model diagnostics")
   expect_true(is.data.frame(as.data.frame(res)))
   expect_identical(as.data.frame(res), as.data.frame(res$estimates))
 })
@@ -270,8 +279,9 @@ test_that("keep_unit = TRUE returns unit-level data", {
 
   expect_false(is.null(res$unit_projection))
   expect_false(is.null(res$unit_model_residual))
-  expect_true(".y_hat" %in% names(res$unit_projection))
-  expect_true(".resid" %in% names(res$unit_model_residual))
+  expect_true(".prediction" %in% names(res$unit_projection))
+  expect_true(".fitted_model" %in% names(res$unit_model_residual))
+  expect_true(".model_residual" %in% names(res$unit_model_residual))
 })
 
 test_that("cluster_ids = NULL is treated as no clustering", {
@@ -289,23 +299,6 @@ test_that("cluster_ids = NULL is treated as no clustering", {
   expect_s3_class(res, "sae_ml_linear")
 })
 
-test_that("notes are condition-dependent and concise", {
-  d <- make_test_data()
-
-  res <- sae_ml_linear(
-    formula = y ~ x1 + x2 + (1 | area),
-    data_model = d$data_model,
-    data_proj = d$data_proj,
-    domain = "domain",
-    weight = "weight"
-  )
-
-  expect_true(is.character(res$notes))
-  expect_equal(res$estimator, "bias_corrected")
-  expect_false(any(grepl("Bias-corrected estimator returned by default", res$notes)))
-  expect_false(any(grepl("Plug-in variance from svyby", res$notes)))
-})
-
 test_that("diagnostics has expected components", {
   d <- make_test_data()
 
@@ -319,35 +312,68 @@ test_that("diagnostics has expected components", {
 
   expect_true(all(c(
     "icc",
+    "icc_note",
     "singular_fit",
-    "prediction_mode",
     "convergence",
     "sigma",
+    "residual_variance",
+    "random_effects",
+    "random_effect_groups",
+    "random_effect_dims",
+    "is_random_intercept_only",
+    "nobs",
+    "REML",
+    "logLik",
     "AIC",
     "BIC"
   ) %in% names(res$diagnostics)))
 
   expect_false("fixed_effects" %in% names(res$diagnostics))
+  expect_false("prediction_mode" %in% names(res$diagnostics))
   expect_false("convergence_messages" %in% names(res$diagnostics))
 })
 
-test_that("warns when projection domain has no model observations", {
+test_that("model parameters have expected components", {
+  d <- make_test_data()
+
+  res <- sae_ml_linear(
+    formula = y ~ x1 + x2 + (1 | area),
+    data_model = d$data_model,
+    data_proj = d$data_proj,
+    domain = "domain",
+    weight = "weight"
+  )
+
+  expect_true(all(c(
+    "fixed_effects",
+    "random_effects",
+    "variance_components",
+    "residual_sd",
+    "residual_variance"
+  ) %in% names(res$model_parameters)))
+})
+
+test_that("projection domain with no model observations gets zero correction", {
   d <- make_test_data()
 
   dp_bad <- d$data_proj
   dp_bad$domain[dp_bad$area == "A7"] <- "D_new"
 
-  expect_warning(
+  expect_no_warning(
     res <- sae_ml_linear(
       formula = y ~ x1 + x2 + (1 | area),
       data_model = d$data_model,
       data_proj = dp_bad,
       domain = "domain",
       weight = "weight"
-    ),
-    regexp = "no residual correction"
+    )
   )
 
   expect_s3_class(res, "sae_ml_linear")
-  expect_true(any(grepl("no residual correction", res$notes)))
+  expect_true(any(grepl("out-of-sample domain", res$notes)))
+
+  d_new <- res$estimation_details[res$estimation_details$domain == "D_new", ]
+
+  expect_equal(d_new$correction, 0)
+  expect_equal(d_new$variance_correction, 0)
 })

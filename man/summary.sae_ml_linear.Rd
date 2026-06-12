@@ -4,10 +4,12 @@
 \alias{summary.sae_ml_linear}
 \title{Summary method for sae_ml_linear}
 \usage{
-\method{summary}{sae_ml_linear}(object, ...)
+\method{summary}{sae_ml_linear}(object, n = 6L, ...)
 }
 \arguments{
 \item{object}{Object of class \code{"sae_ml_linear"}.}
+
+\item{n}{Number of rows to display.}
 
 \item{...}{Further arguments.}
 }

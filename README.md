@@ -1,19 +1,14 @@
 # saeproj.multilevel
 
 ## Author
-
 Nazlya Rahma Susanto
 
 ## Maintainer
-
 Nazlya Rahma Susanto <susantonazlya@gmail.com>
 
 ## Description
-
 The **saeproj.multilevel** package provides tools for *Small Area Estimation* (SAE) using a projection estimator with a linear mixed-effects working model.
-
 The method is designed for two-survey settings:
-
 - a smaller model survey, `data_model`, that contains the response variable and auxiliary predictors;
 - a larger projection survey, `data_proj`, that contains auxiliary predictors but does not necessarily contain the response variable.
 
@@ -24,7 +19,6 @@ sae_ml_linear()
 ```
 
 The function fits a linear mixed-effects model using `lme4::lmer()`, generates unit-level predictions for the projection dataset, aggregates those predictions by domain using survey design information, and applies a design-based residual bias correction.
-
 The final estimator returned by the function is a bias-corrected projection estimator:
 
 ```r
@@ -38,7 +32,6 @@ result$estimation_details
 ```
 
 ## Installation
-
 You can install the development version of `saeproj.multilevel` from GitHub with:
 
 ```r
@@ -53,13 +46,11 @@ devtools::install()
 ```
 
 ## Dependencies
-
 The package imports:
-
 - `lme4` — for fitting linear mixed-effects models;
 - `survey` — for survey design and domain-level aggregation;
 - `dplyr` — for joining estimation components;
-- `cli` — for informative errors and warnings;
+- `cli` — for errors and selected warnings;
 - `reformulas` — for parsing mixed-effects formulas.
 
 ## Example
@@ -92,7 +83,7 @@ data_model$income <- with(
 )
 
 data_proj <- data.frame(
-  kabkot = sample(paste0("A", 1:n_area), n_proj, replace = TRUE),
+  kabkot = sample(c(paste0("A", 1:n_area), "A7"), n_proj, replace = TRUE),
   educ   = sample(1:3, n_proj, replace = TRUE),
   age    = runif(n_proj, 20, 60),
   weight = runif(n_proj, 0.5, 2)
@@ -114,7 +105,6 @@ result
 ```
 
 ## Primary output: domain-level estimates
-
 The final domain-level estimates are stored in:
 
 ```r
@@ -138,7 +128,6 @@ as.data.frame(result)
 ```
 
 ## Estimation components
-
 Detailed estimation components are stored in:
 
 ```r
@@ -168,10 +157,8 @@ head(result$estimation_details)
 ```
 
 ## Synthetic projection component
-
-The function does not expose a separate synthetic-estimator mode. The returned estimator is bias-corrected by default.
-
-However, the synthetic projection component is available in:
+The function returns the bias-corrected estimator by default.
+The synthetic projection component is available in:
 
 ```r
 result$estimation_details[, c(
@@ -184,7 +171,6 @@ result$estimation_details[, c(
 For multiple domain variables, include all domain columns when selecting from `estimation_details`.
 
 ## Direct estimator
-
 Set `return_direct = TRUE` to return direct design-based estimates from `data_model`.
 
 ```r
@@ -203,20 +189,25 @@ result_direct$direct_estimator
 The direct estimator is stored separately and is not used to replace the projection estimator.
 
 ## Print and summary
-
 A concise output can be displayed with:
 
 ```r
 print(result)
 ```
 
-A more detailed output can be displayed with:
+A compact summary can be displayed with:
 
 ```r
 summary(result)
 ```
 
-The `summary()` method displays the fitted model summary, diagnostics, final estimates, and run-specific notes when available.
+The `summary()` method displays formula, estimator type, number of domains, selected model diagnostics, and a preview of the final estimates.
+
+Full model output can be accessed from the fitted `lmerMod` object:
+
+```r
+summary(result$fitted_model)
+```
 
 ## Retaining unit-level predictions
 
@@ -238,8 +229,8 @@ head(result_ku$unit_model_residual)
 
 When `keep_unit = TRUE`:
 
-- `result_ku$unit_projection` contains `data_proj` with the unit-level prediction column `.y_hat`;
-- `result_ku$unit_model_residual` contains `data_model` with `.y_hat_model` and `.resid`.
+- `result_ku$unit_projection` contains `data_proj` with the unit-level prediction column `.prediction`;
+- `result_ku$unit_model_residual` contains `data_model` with `.fitted_model` and `.model_residual`.
 
 ## Model diagnostics
 
@@ -253,10 +244,18 @@ The diagnostics include:
 
 ```r
 result$diagnostics$icc
+result$diagnostics$icc_note
 result$diagnostics$singular_fit
-result$diagnostics$prediction_mode
 result$diagnostics$convergence
 result$diagnostics$sigma
+result$diagnostics$residual_variance
+result$diagnostics$random_effects
+result$diagnostics$random_effect_groups
+result$diagnostics$random_effect_dims
+result$diagnostics$is_random_intercept_only
+result$diagnostics$nobs
+result$diagnostics$REML
+result$diagnostics$logLik
 result$diagnostics$AIC
 result$diagnostics$BIC
 ```
@@ -265,13 +264,14 @@ A compact diagnostics table can be created as follows:
 
 ```r
 data.frame(
-  icc             = result$diagnostics$icc,
-  singular_fit    = result$diagnostics$singular_fit,
-  prediction_mode = result$diagnostics$prediction_mode,
-  convergence     = result$diagnostics$convergence,
-  sigma           = result$diagnostics$sigma,
-  AIC             = result$diagnostics$AIC,
-  BIC             = result$diagnostics$BIC
+  icc = result$diagnostics$icc,
+  singular_fit = result$diagnostics$singular_fit,
+  convergence = result$diagnostics$convergence,
+  sigma = result$diagnostics$sigma,
+  residual_variance = result$diagnostics$residual_variance,
+  REML = result$diagnostics$REML,
+  AIC = result$diagnostics$AIC,
+  BIC = result$diagnostics$BIC
 )
 ```
 
@@ -300,7 +300,24 @@ qqline(resid(fit))
 lme4::ranef(fit)
 ```
 
-## Notes and warnings
+## Model parameters
+Estimated model parameters are stored in:
+
+```r
+result$model_parameters
+```
+
+This object includes:
+
+```r
+result$model_parameters$fixed_effects
+result$model_parameters$random_effects
+result$model_parameters$variance_components
+result$model_parameters$residual_sd
+result$model_parameters$residual_variance
+```
+
+## Notes
 
 Run-specific notes are stored in:
 
@@ -308,22 +325,21 @@ Run-specific notes are stored in:
 result$notes
 ```
 
-The notes are intentionally concise and only appear when relevant conditions are detected, such as:
+The notes are intentionally concise and are not printed automatically by `summary()`.
+
+They may include information such as:
 
 - removed zero-variance predictors;
 - singular model fit;
 - convergence issues;
-- low ICC;
-- fixed-effect-only prediction;
-- domains without residual correction;
+- random-slope or complex random-effect structure where simple ICC is not computed;
+- out-of-sample domains with zero residual correction;
 - negative plug-in variance clamped to zero.
 
-Warnings are also issued during function execution for selected conditions that may affect interpretation.
+Out-of-sample domains are not treated as warnings because they are expected in SAE projection. They are recorded in `result$notes`.
 
 ## Multiple domain variables
-
 The `domain` argument accepts a character scalar, a character vector, or a one-sided formula.
-
 The following example assumes that both `data_model` and `data_proj` contain the variables `prov` and `kabkot`.
 
 ```r
@@ -341,17 +357,8 @@ result_multi <- sae_ml_linear(
 result_multi$estimates
 ```
 
-The estimates table includes all domain columns:
-
-```r
-# Example structure:
-#   prov kabkot estimate variance se rse
-```
-
 ## Survey design with clustering and stratification
-
 The survey design arguments `cluster_ids`, `weight`, and `strata` are used in the aggregation step through `survey::svydesign()`.
-
 The following example assumes that both `data_model` and `data_proj` contain `psu_id`, `weight`, and `stratum` variables.
 
 ```r
@@ -386,31 +393,29 @@ result_no_cluster <- sae_ml_linear(
 ```
 
 ## Output object structure
-
 `sae_ml_linear()` returns an S3 object of class `"sae_ml_linear"`.
-
 Typical components are:
-
 | Component | Description |
 |---|---|
 | `$call` | The matched function call |
 | `$formula` | The model formula used after preprocessing |
 | `$estimator` | Estimator type; currently always `"bias_corrected"` |
 | `$fitted_model` | The fitted `lmerMod` object from `lme4::lmer()` |
+| `$model_parameters` | Fixed effects, random effects, variance components, residual SD, and residual variance |
 | `$estimates` | Final domain-level estimates |
 | `$estimation_details` | Synthetic estimate, correction, final estimate, and sample sizes per domain |
-| `$diagnostics` | Model diagnostics: ICC, singular fit, prediction mode, convergence, sigma, AIC, and BIC |
+| `$diagnostics` | Model diagnostics: ICC when applicable, random-effect structure, singular fit, convergence, sigma, residual variance, REML, logLik, AIC, and BIC |
 | `$notes` | Concise run-specific notes |
-| `$unit_projection` | Unit-level `data_proj` with `.y_hat`, only if `keep_unit = TRUE` |
-| `$unit_model_residual` | Unit-level `data_model` with `.y_hat_model` and `.resid`, only if `keep_unit = TRUE` |
+| `$unit_projection` | Unit-level `data_proj` with `.prediction`, only if `keep_unit = TRUE` |
+| `$unit_model_residual` | Unit-level `data_model` with `.fitted_model` and `.model_residual`, only if `keep_unit = TRUE` |
 | `$direct_estimator` | Direct design-based estimates, only if `return_direct = TRUE` |
 
 ## S3 methods
 
 | Method | Behaviour |
 |---|---|
-| `print(result)` | Prints a concise output: formula, estimator, number of domains, and a preview of `$estimates` |
-| `summary(result)` | Prints the fitted model summary, diagnostics, final estimates, and notes |
+| `print(result)` | Prints formula, estimator, number of domains, and a preview of `$estimates` |
+| `summary(result)` | Prints selected diagnostics and a preview of final estimates |
 | `as.data.frame(result)` | Returns `result$estimates` |
 
 ## Function interface
@@ -440,7 +445,7 @@ sae_ml_linear(
 |---|---|
 | `formula` | `lme4::lmer()`-style formula, for example `y ~ x1 + x2 + (1 \| area)` |
 | `data_model` | Model survey data frame containing the response, predictors, grouping variables, domain variable(s), and survey design variables |
-| `data_proj` | Projection survey data frame containing predictors, domain variable(s), and survey design variables; response is not required |
+| `data_proj` | Projection survey data frame containing predictors, grouping variables, domain variable(s), and survey design variables; response is not required |
 | `domain` | Domain variable name(s): character scalar, character vector, or one-sided formula |
 | `cluster_ids` | PSU or cluster variable for survey design; use `~1` for no clustering |
 | `weight` | Survey weight variable; use `NULL` for equal weights |
@@ -452,20 +457,19 @@ sae_ml_linear(
 | `return_direct` | If `TRUE`, direct design-based estimates from `data_model` are returned |
 | `...` | Additional named arguments passed to `survey::svydesign()`, for example `nest = TRUE` |
 
-Notes: The `weight` argument identifies the survey weight column used in both
-`data_model` and `data_proj`. The column name must be the same in both datasets,
-but the weight values may differ. In `data_model`, weights are used for residual
-correction and optional direct estimation. In `data_proj`, weights are used for
-synthetic projection aggregation.
+The `weight` argument identifies the survey weight column used in both `data_model` and `data_proj`. The column name must be the same in both datasets, but the weight values may differ.
+
+In `data_model`, weights are used for residual correction and optional direct estimation. In `data_proj`, weights are used for synthetic projection aggregation.
 
 ## Methodological notes
 
 - The working model is a linear mixed-effects model fitted with `lme4::lmer()`.
-- Random effects are included during model fitting to account for hierarchical structure in `data_model`, such as observations nested within areas or groups.
-- Prediction is adaptive:
-  - conditional mixed-model prediction is used when the fitted model has meaningful random-effect variation and is not singular;
-  - fixed-effect-only prediction is used when ICC is low, undefined, or the fitted model is singular.
-- New grouping levels in `data_proj` are allowed during prediction through `allow.new.levels = TRUE`.
+- The user fully specifies the fixed-effect and random-effect structure through the `formula` argument.
+- Prediction uses `re.form = NULL` and `allow.new.levels = TRUE`.
+- For grouping levels observed in `data_model`, predictions include the estimated random-effect contribution.
+- For grouping levels appearing only in `data_proj`, the random-effect contribution is set to zero, so prediction uses the fixed part of the model.
+- ICC is diagnostic only and does not determine the prediction rule.
+- Simple ICC is computed only for pure random-intercept structures.
 - Fixed-effect categorical predictors in `data_proj` must not contain levels that are absent from `data_model`.
 - Survey design arguments (`cluster_ids`, `weight`, and `strata`) are used in the aggregation step through `survey::svydesign()` and `survey::svyby()`.
 - The final estimate is computed as:
@@ -487,7 +491,7 @@ variance_final = variance_synthetic + variance_correction
 ## Summary function
 
 - The argument `summary_function` supports `"mean"` and `"total"` because both are linear domain parameters.
-- For `"mean"`, the synthetic component and residual correction are aggregated using `survey::svymean`. 
+- For `"mean"`, the synthetic component and residual correction are aggregated using `survey::svymean`.
 - For `"total"`, both components are aggregated using `survey::svytotal`, so the estimate and variance are returned on the total scale.
 - The `"total"` option should only be used when the survey weights are appropriate expansion weights for population totals.
 
