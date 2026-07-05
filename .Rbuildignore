@@ -25,3 +25,5 @@
 (^|/)desktop\.ini$
 ^README\.Rmd$
 ^README\.html$
+^.*\.tar\.gz$
+^.*\.zip$
