@@ -16,3 +16,4 @@ check/
 dev/
 inst/doc
 vignettes/*.html
+README.html
