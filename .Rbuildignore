@@ -20,3 +20,6 @@
 ^.*[.]tar[.]gz$
 ^.*\.Rproj$
 ^\.Rproj\.user$
+^data-raw$
+^vignettes/.*\.html$
+(^|/)desktop\.ini$

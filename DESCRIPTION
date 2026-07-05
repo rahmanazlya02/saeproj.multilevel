@@ -1,24 +1,25 @@
 Package: saeproj.multilevel
-Title: Small Area Estimation via Multilevel Projection Estimator
+Title: Small Area Estimation Using a Projection Estimator with a Multilevel Regression Model
 Version: 0.1.0
-Authors@R: 
-    person(
-        given = "Nazlya",
-        family = "Rahma Susanto",
-        email = "susantonazlya@gmail.com",
-        role = c("aut", "cre")
+Authors@R: c(
+        person(given = "Nazlya", family = "Rahma Susanto", email = "susantonazlya@gmail.com", role = c("aut", "cre")),
+        person(given = "Azka", family = "Ubaidillah", email = "azka@stis.ac.id", role = "aut")
     )
-Description: Provides tools for Small Area Estimation using a projection
-    estimator with a linear mixed-effects working model. The main function
-    fits a multilevel model to a smaller survey containing the response
-    variable and auxiliary predictors, predicts outcomes in a larger
-    projection dataset, and computes domain-level estimates with design-based
-    residual bias correction.
+Description: Provides tools for small area estimation using a projection
+    estimator with a linear multilevel working model. The main function fits
+    a multilevel model to a smaller survey containing the response variable
+    and auxiliary predictors, predicts outcomes in a larger projection survey,
+    and computes domain-level estimates with a design-based residual
+    correction.
 License: MIT + file LICENSE
 Encoding: UTF-8
+LazyData: true
+LazyDataCompression: xz
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 8.0.0
 Config/roxygen2/version: 8.0.0
+Depends:
+    R (>= 3.5)
 Imports:
     cli,
     dplyr,
@@ -28,7 +29,10 @@ Imports:
     stats,
     utils
 Suggests:
+    knitr,
+    rmarkdown,
     testthat (>= 3.0.0)
+VignetteBuilder: knitr
 Config/testthat/edition: 3
 URL: https://github.com/rahmanazlya02/saeproj.multilevel
 BugReports: https://github.com/rahmanazlya02/saeproj.multilevel/issues

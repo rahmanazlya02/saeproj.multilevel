@@ -85,6 +85,7 @@ test_that("runs with random slope", {
 
 test_that("data_proj can have new random effect levels", {
   d <- make_test_data()
+
   expect_true("A7" %in% d$data_proj$area)
 
   res <- sae_ml_linear(
@@ -120,6 +121,7 @@ test_that("formula without random effect fails", {
 
 test_that("missing values fail", {
   d <- make_test_data()
+
   d$data_model$x1[1] <- NA
 
   expect_error(
@@ -136,6 +138,7 @@ test_that("missing values fail", {
 
 test_that("missing required column fails", {
   d <- make_test_data()
+
   d$data_proj$x2 <- NULL
 
   expect_error(
@@ -171,6 +174,7 @@ test_that("new fixed-effect categorical levels fail", {
 
 test_that("zero variance predictor is removed with warning", {
   d <- make_test_data()
+
   d$data_model$x_const <- 1
   d$data_proj$x_const <- 1
 
@@ -251,6 +255,7 @@ test_that("returns bias-corrected estimator and synthetic components", {
   )
 
   expect_equal(res$estimator, "bias_corrected")
+
   expect_true(all(c(
     "estimate_synthetic",
     "variance_synthetic",
@@ -372,8 +377,34 @@ test_that("projection domain with no model observations gets zero correction", {
   expect_s3_class(res, "sae_ml_linear")
   expect_true(any(grepl("out-of-sample domain", res$notes)))
 
-  d_new <- res$estimation_details[res$estimation_details$domain == "D_new", ]
+  d_new <- res$estimation_details[
+    res$estimation_details$domain == "D_new",
+  ]
 
   expect_equal(d_new$correction, 0)
   expect_equal(d_new$variance_correction, 0)
+})
+
+test_that("sae_ml_linear works with package simulation data", {
+  data("saeml_modelsvy", package = "saeproj.multilevel")
+  data("saeml_projsvy", package = "saeproj.multilevel")
+
+  result <- sae_ml_linear(
+    formula = Y ~ X1 + X2 + X3 + X4 + Z1 + Z2 + (1 | kab_kota),
+    data_model = saeml_modelsvy,
+    data_proj = saeml_projsvy,
+    domain = "kab_kota",
+    cluster_ids = ~1,
+    weight = "WEIND",
+    strata = "kab_kota",
+    summary_function = "mean"
+  )
+
+  expect_s3_class(result, "sae_ml_linear")
+  expect_true(is.data.frame(result$estimates))
+  expect_equal(nrow(result$estimates), 50L)
+  expect_true(all(result$estimation_details$n_model == 5L))
+  expect_true(all(result$estimation_details$n_proj == 300L))
+  expect_true(all(is.finite(result$estimates$estimate)))
+  expect_true(all(result$estimates$variance >= 0))
 })

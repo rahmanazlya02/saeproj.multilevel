@@ -158,7 +158,7 @@ utils::globalVariables(c(
 }
 
 #' @noRd
-# Fit the linear mixed-effects working model.
+# Fit the linear multilevel regression model.
 .fit_lmer_model <- function(formula, data, control) {
   lme4::lmer(
     formula = formula,
@@ -267,25 +267,26 @@ utils::globalVariables(c(
 #' @noRd
 # Compute optional direct design-based estimates.
 .get_direct_estimator <- function(response_var, domain_formula, domain_chr, design, FUN) {
+
   direct <- survey::svyby(
     formula = stats::as.formula(paste0("~", response_var)),
-    by = domain_formula,
-    design = design,
-    FUN = FUN,
-    vartype = c("var", "cvpct"),
-    na.rm = TRUE
+    by = domain_formula, design = design, FUN = FUN,
+    vartype = "var", na.rm = TRUE
   )
 
-  non_domain_cols <- setdiff(names(direct), domain_chr)
-  var_col <- grep("^(var|se2)", non_domain_cols, value = TRUE, ignore.case = TRUE)[1L]
-  cv_col <- grep("^cv", non_domain_cols, value = TRUE, ignore.case = TRUE)[1L]
-  est_col <- setdiff(non_domain_cols, c(var_col, cv_col))[1L]
+  direct <- .rename_svyby(
+    direct, domain_vars = domain_chr, value_col = response_var,
+    estimate_name = "estimate", variance_name = "variance"
+  )
 
-  if (!is.na(est_col)) names(direct)[names(direct) == est_col] <- "estimate"
-  if (!is.na(var_col)) names(direct)[names(direct) == var_col] <- "variance"
-  if (!is.na(cv_col)) names(direct)[names(direct) == cv_col] <- "rse"
+  direct$variance <- pmax(direct$variance, 0)
+  direct$se <- sqrt(direct$variance)
+  direct$rse <- ifelse(
+    direct$estimate == 0, NA_real_,
+    100 * direct$se / abs(direct$estimate)
+  )
 
-  direct
+  direct[, c(domain_chr, "estimate", "variance", "se", "rse"), drop = FALSE]
 }
 
 #' @noRd
@@ -298,70 +299,267 @@ utils::globalVariables(c(
 
 # ---- Main estimator function -------------------------------------------------
 
-#' Small Area Estimation via Projection Estimator with Linear Multilevel Model
+#' Small Area Estimation Using a Projection Estimator with a Linear Multilevel Regression Model
 #'
 #' @description
-#' Implements a projection estimator for Small Area Estimation (SAE) using a
-#' linear mixed-effects working model fitted with \code{\link[lme4]{lmer}}.
+#' \code{sae_ml_linear()} implements a projection estimator for small area
+#' estimation using a linear multilevel regression working model fitted with \code{\link[lme4]{lmer}}.
+#'
+#' The function is designed for situations where information is available from
+#' two related surveys:
+#'
+#' \itemize{
+#'   \item \strong{Model survey}: a smaller survey containing the response
+#'   variable and auxiliary variables.
+#'   \item \strong{Projection survey}: a larger survey containing auxiliary
+#'   variables and survey design information, but not the response variable.
+#' }
+#'
+#' The function fits a linear multilevel model using the model survey, predicts
+#' the response variable for all units in the projection survey, and produces
+#' domain-level projection estimates.
 #'
 #' @details
-#' The model formula is fully specified by the user using \code{lme4::lmer()}
-#' syntax. The function fits the working model on \code{data_model}, predicts
-#' the response for all units in \code{data_proj}, and aggregates predictions
-#' to domain-level means or totals using survey design information.
+#' The model formula must follow \code{lme4::lmer()} syntax and must include at
+#' least one random-effect term.
 #'
-#' Prediction uses \code{re.form = NULL} and \code{allow.new.levels = TRUE}.
-#' For grouping levels present in \code{data_model}, predictions include the
-#' estimated random-effect contribution. For grouping levels appearing only in
-#' \code{data_proj}, the random-effect contribution is set to zero.
+#' A random-intercept model can be specified as:
 #'
-#' Survey design variables are used in design-based aggregation and residual
-#' correction. They are not passed as weights to \code{lme4::lmer()}.
+#' \preformatted{
+#' Y ~ X1 + X2 + Z1 + Z2 + (1 | kab_kota)
+#' }
 #'
-#' The plug-in variance is computed as the sum of the synthetic component
-#' variance and residual correction variance. It does not account for
-#' mixed-model parameter uncertainty.
+#' where \code{Y} is the response variable, \code{X1} and \code{X2} are
+#' unit-level auxiliary variables, \code{Z1} and \code{Z2} are auxiliary
+#' variables, and \code{kab_kota} identifies the random-intercept grouping
+#' level.
 #'
-#' @param formula An \code{lme4::lmer()}-style formula.
-#' @param data_model Data frame for the model survey.
-#' @param data_proj Data frame for the projection survey.
-#' @param domain Domain variable name(s): character vector or one-sided formula.
-#' @param cluster_ids Cluster or PSU variable for survey design.
-#' @param weight Survey weight variable.
-#' @param strata Stratification variable.
-#' @param summary_function Aggregation function: \code{"mean"} or \code{"total"}.
-#' @param keep_unit Logical. If \code{TRUE}, unit-level data are returned.
-#' @param seed Integer seed for reproducibility.
-#' @param control Control object passed to \code{\link[lme4]{lmerControl}}.
-#' @param return_direct Logical. If \code{TRUE}, returns direct survey estimates.
-#' @param ... Additional arguments passed to \code{\link[survey]{svydesign}}.
+#' The estimation procedure consists of three main steps:
 #'
-#' @return An object of class \code{"sae_ml_linear"}.
+#' \enumerate{
+#'   \item A linear multilevel model is fitted to \code{data_model} using
+#'   \code{lme4::lmer()} with restricted maximum likelihood estimation.
+#'
+#'   \item Unit-level predictions are generated for all observations in
+#'   \code{data_proj}. Predictions use \code{re.form = NULL} and
+#'   \code{allow.new.levels = TRUE}.
+#'
+#'   \item Predicted values are aggregated by domain to obtain synthetic
+#'   estimates. A design-based residual correction calculated from
+#'   \code{data_model} is added to obtain the final projection estimate.
+#' }
+#'
+#' For domain \eqn{d}, the final projection estimator is:
+#'
+#' \deqn{
+#' \hat{Y}^{PR}*{d} =
+#' \hat{Y}^{SYN}*{d} +
+#' \hat{B}*{d}
+#' }
+#'
+#' where \eqn{\hat{Y}^{SYN}*{d}} is the synthetic estimate obtained from the
+#' projection survey and \eqn{\hat{B}*{d}} is the design-based residual
+#' correction obtained from the model survey.
+#'
+#' The plug-in variance estimator is:
+#'
+#' \deqn{
+#' \widehat{Var}(\hat{Y}^{PR}*{d}) =
+#' \widehat{Var}(\hat{Y}^{SYN}*{d}) +
+#' \widehat{Var}(\hat{B}*{d})
+#' }
+#'
+#' The plug-in variance does not account for uncertainty in the estimated
+#' multilevel model parameters.
+#'
+#' Fixed-effect predictors in \code{data_proj} must have levels that already
+#' exist in \code{data_model}. New factor levels for fixed-effect predictors
+#' produce an error. In contrast, new grouping levels for random effects are
+#' allowed and receive a random-effect contribution of zero.
+#'
+#' Fixed-effect predictors with zero variance in \code{data_model} are removed
+#' automatically before model fitting. A note identifying removed predictors is
+#' stored in the returned object.
+#'
+#' If a domain appears in \code{data_proj} but has no observations in
+#' \code{data_model}, the residual correction and its variance are set to zero.
+#' The final estimate for that domain is therefore equal to its synthetic
+#' estimate.
+#'
+#' Survey design variables, including cluster identifiers, strata, and sampling
+#' weights, are used for domain-level aggregation and residual correction
+#' through the \pkg{survey} package. They are not used as fitting weights in
+#' \code{lme4::lmer()}.
+#'
+#' @param formula A two-sided linear multilevel model formula written using
+#' \code{lme4::lmer()} syntax. The formula must include at least one
+#' random-effect term. For example,
+#' \code{Y ~ X1 + X2 + (1 | kab_kota)}.
+#'
+#' @param data_model A data frame containing model-survey data. It must contain
+#' the response variable, all fixed-effect variables, random-effect grouping
+#' variables, domain variables, and survey design variables used in estimation.
+#'
+#' @param data_proj A data frame containing projection-survey data. It must
+#' contain all fixed-effect variables, random-effect grouping variables, domain
+#' variables, and survey design variables. The response variable is not required
+#' in \code{data_proj}.
+#'
+#' @param domain A character vector or one-sided formula identifying the domain
+#' variable or variables used for domain-level aggregation. For example,
+#' \code{"kab_kota"}, \code{c("prov", "kab_kota")}, or
+#' \code{~prov + kab_kota}.
+#'
+#' @param cluster_ids A character vector or one-sided formula identifying
+#' cluster or primary sampling unit variables used in the survey design. Use
+#' \code{~1} when clustering is not used. The default is \code{~1}.
+#'
+#' @param weight A character string or one-sided formula identifying the survey
+#' weight variable. The specification must identify exactly one variable. Use
+#' \code{NULL} when sampling weights are not available. The default is
+#' \code{NULL}.
+#'
+#' @param strata A character string or one-sided formula identifying the
+#' stratification variable used in the survey design. Use \code{NULL} when
+#' stratification is not used. The default is \code{NULL}.
+#'
+#' @param summary_function Character string specifying the domain-level
+#' estimand. Available options are \code{"mean"} for domain means and
+#' \code{"total"} for domain totals. The default is \code{"mean"}.
+#'
+#' @param keep_unit Logical. If \code{TRUE}, the returned object includes
+#' unit-level predictions for \code{data_proj}, and unit-level fitted values and
+#' model residuals for \code{data_model}. The default is \code{FALSE}.
+#'
+#' @param seed Integer value used to set the random seed before model fitting.
+#' The default is \code{1}.
+#'
+#' @param control A control object created by \code{lme4::lmerControl()} and
+#' passed to \code{lme4::lmer()}. The default uses the \code{"bobyqa"}
+#' optimizer with \code{maxfun = 2e5}.
+#'
+#' @param return_direct Logical. If \code{TRUE}, direct design-based estimates
+#' are calculated from \code{data_model} and included in the returned object.
+#' The default is \code{FALSE}.
+#'
+#' @param ... Additional arguments passed to \code{survey::svydesign()}. For
+#' example, \code{nest = TRUE} can be supplied for nested cluster designs.
+#'
+#' @return
+#' An object of class \code{"sae_ml_linear"} containing:
+#'
+#' \describe{
+#'   \item{call}{
+#'   The matched function call.
+#'   }
+#'
+#'   \item{formula}{
+#'   The final model formula used for estimation after removal of any
+#'   zero-variance fixed-effect predictors.
+#'   }
+#'
+#'   \item{estimator}{
+#'   A character string identifying the estimator as \code{"bias_corrected"}.
+#'   }
+#'
+#'   \item{fitted_model}{
+#'   The fitted \code{lmerMod} object returned by \code{lme4::lmer()}.
+#'   }
+#'
+#'   \item{model_parameters}{
+#'   A list containing fixed effects, random effects, variance components,
+#'   residual standard deviation, and residual variance.
+#'   }
+#'
+#'   \item{estimates}{
+#'   A data frame containing one row for each domain. It includes domain
+#'   identifiers, \code{estimate}, \code{variance}, \code{se}, and
+#'   \code{rse}.
+#'   }
+#'
+#'   \item{estimation_details}{
+#'   A data frame containing domain identifiers,
+#'   \code{estimate_synthetic}, \code{variance_synthetic},
+#'   \code{correction}, \code{variance_correction},
+#'   \code{estimate_final}, \code{variance_final}, \code{se_final},
+#'   \code{rse_final}, \code{n_model}, and \code{n_proj}.
+#'   }
+#'
+#'   \item{diagnostics}{
+#'   A list containing model diagnostics, including residual standard
+#'   deviation, residual variance, random-effect variance components,
+#'   intraclass correlation coefficient where applicable, singularity status,
+#'   convergence information, number of observations, REML status,
+#'   log-likelihood, AIC, and BIC.
+#'   }
+#'
+#'   \item{notes}{
+#'   A character vector containing notes generated during estimation, such as
+#'   removed zero-variance predictors, singular fits, convergence issues,
+#'   negative variances clamped to zero, or domains without residual correction.
+#'   }
+#'
+#'   \item{unit_projection}{
+#'   Returned only when \code{keep_unit = TRUE}. A data frame containing
+#'   \code{data_proj} with an additional \code{.prediction} column.
+#'   }
+#'
+#'   \item{unit_model_residual}{
+#'   Returned only when \code{keep_unit = TRUE}. A data frame containing
+#'   \code{data_model} with additional \code{.fitted_model} and
+#'   \code{.model_residual} columns.
+#'   }
+#'
+#'   \item{direct_estimator}{
+#'   Returned only when \code{return_direct = TRUE}. A data frame containing
+#'   direct design-based estimates, variances, and relative standard errors for
+#'   each domain.
+#'   }
+#' }
 #'
 #' @references
-#' Kim, J. K. and Rao, J. N. K. (2012). Combining data from two independent
-#' surveys: a model-assisted approach. \emph{Biometrika}, 99(1), 85--100.
+#' Kim, J. K., & Rao, J. N. K. (2012). Combining data from two independent
+#' surveys: A model-assisted approach. \emph{Biometrika}, 99(1), 85--100.
 #'
-#' Moura, F. A. S. and Holt, D. (1999). Small area estimation using multilevel
+#' Moura, F. A. S., & Holt, D. (1999). Small area estimation using multilevel
 #' models. \emph{Survey Methodology}, 25(1), 73--80.
 #'
-#' Bates, D., Maechler, M., Bolker, B. and Walker, S. (2015). Fitting linear
+#' Bates, D., Maechler, M., Bolker, B., & Walker, S. (2015). Fitting linear
 #' mixed-effects models using lme4. \emph{Journal of Statistical Software},
 #' 67(1), 1--48.
 #'
-#' Lumley, T. (2010). \emph{Complex Surveys: A Guide to Analysis Using R}. Wiley.
+#' Food and Agriculture Organization of the United Nations. (2021).
+#' \emph{Guidelines on data disaggregation for SDG indicators using survey
+#' data} (1st ed.). https://doi.org/10.4060/cb3253en
+#'
+#' Finch, W. H., Bolin, J. E., & Kelley, K. (2014).
+#' \emph{Multilevel Modeling Using R}. CRC Press.
+#'
+#' Hox, J. J., Moerbeek, M., & van de Schoot, R. (2018).
+#' \emph{Multilevel Analysis: Techniques and Applications} (3rd ed.).
+#' Routledge.
+#'
+#' @seealso
+#' \code{\link[lme4]{lmer}} for fitting linear multilevel models,
+#' \code{\link[survey]{svydesign}} for survey design specification, and
+#' \code{\link[lme4]{isSingular}} for diagnosing singular fits.
 #'
 #' @examples
-#' \dontrun{
+#' data("saeml_modelsvy", package = "saeproj.multilevel")
+#' data("saeml_projsvy", package = "saeproj.multilevel")
+#'
 #' result <- sae_ml_linear(
-#'   formula = income ~ educ + age + (1 | kabkot),
-#'   data_model = survey_model,
-#'   data_proj = survey_proj,
-#'   domain = "kabkot",
-#'   weight = "w",
+#'   formula = Y ~ X1 + X2 + X3 + X4 + Z1 + Z2 + (1 | kab_kota),
+#'   data_model = saeml_modelsvy,
+#'   data_proj = saeml_projsvy,
+#'   domain = "kab_kota",
+#'   cluster_ids = ~1,
+#'   weight = "WEIND",
+#'   strata = "kab_kota",
 #'   summary_function = "mean"
 #' )
-#' }
+#'
+#' summary(result)
 #'
 #' @importFrom survey svydesign svyby svymean svytotal
 #' @importFrom cli cli_abort cli_warn
